@@ -1,0 +1,9 @@
+{
+  "name": "room05-video-rooms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ROOM/05 private video rooms for up to five people",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
