@@ -1,8 +1,11 @@
 services:
   - type: web
-    name: room05-jitsi
+    name: room05
     runtime: node
     plan: free
-    buildCommand: npm install --package-lock=false --no-audit --no-fund
+    buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
+    envVars:
+      - key: MAX_PEOPLE
+        value: "5"

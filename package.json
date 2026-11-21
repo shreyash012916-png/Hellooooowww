@@ -1,13 +1,10 @@
 {
-  "name": "room05-jitsi-video-rooms",
-  "version": "2.1.0",
+  "name": "room05-p2p-video-rooms",
+  "version": "3.0.0",
   "private": true,
-  "description": "ROOM/05 custom video rooms powered by the public Jitsi Meet IFrame API",
+  "description": "ROOM/05 free peer-to-peer WebRTC video rooms with a tiny signaling server",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=18"
-  }
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" },
+  "engines": { "node": ">=18" }
 }
