@@ -1,13 +1,13 @@
 {
-  "name": "room05-jitsi",
-  "version": "1.1.0",
+  "name": "room05-jitsi-video-rooms",
+  "version": "2.1.0",
   "private": true,
-  "description": "ROOM/05 public video rooms powered by Jitsi Meet",
+  "description": "ROOM/05 custom video rooms powered by the public Jitsi Meet IFrame API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   }
 }

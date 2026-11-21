@@ -1,67 +1,136 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f2f0e9">
-  <meta name="description" content="Create or join a ROOM/05 video meeting.">
-  <title>ROOM/05 — Make space.</title>
-  <link rel="preconnect" href="https://meet.jit.si">
-  <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-  <header class="topbar">
-    <a class="wordmark" href="/" aria-label="ROOM 05 home">ROOM<span>/</span>05</a>
-    <div class="top-right"><span class="live-dot"></span> OPEN ROOMS · PUBLIC BETA</div>
-  </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e9e6dc" />
+    <meta name="description" content="Small, private video rooms for up to five friends." />
+    <title>ROOM/05 — Keep your circle close</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="ROOM slash 05 home">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span>ROOM<span class="brand-slash">/</span>05</span>
+      </a>
+      <div class="header-center"><span class="live-dot"></span> SMALL ROOMS. BIG ENERGY.</div>
+      <a class="header-link" href="#how-it-works">HOW IT WORKS <span>↘</span></a>
+    </header>
 
-  <main>
-    <section id="landing" class="landing">
-      <div class="eyebrow">A SMALL ROOM FOR BIG CONVERSATIONS</div>
-      <h1>Make<br><span>space.</span></h1>
-      <p class="intro">Bring your people together. Enter your name, create a room, and share its invite link.</p>
-
-      <form id="room-form" class="room-form">
-        <label for="display-name">YOUR NAME</label>
-        <input id="display-name" name="displayName" maxlength="40" autocomplete="name"
-               placeholder="Enter your name" required>
-        <button id="create-button" class="primary-button" type="submit">
-          <span>CREATE A ROOM</span><span class="button-arrow" aria-hidden="true">↗</span>
-        </button>
-        <div class="or-line"><span>OR JOIN AN EXISTING ROOM</span></div>
-        <label for="room-code">ROOM CODE</label>
-        <div class="join-row">
-          <input id="room-code" name="roomCode" maxlength="32" autocomplete="off"
-                 placeholder="e.g. R05-AB12C-DE34F">
-          <button id="join-button" type="button" class="secondary-button">JOIN ↗</button>
+    <main>
+      <section class="landing" id="landing-screen">
+        <div class="landing-topline">
+          <span>PRIVATE VIDEO SPACES</span>
+          <span class="topline-right">BUILT FOR YOUR INNER CIRCLE <b>✳</b></span>
         </div>
-        <p id="form-error" class="error" role="alert" aria-live="polite"></p>
-      </form>
 
-      <div class="footnote"><span>01 / CREATE</span><span>02 / SHARE</span><span>03 / CONNECT</span></div>
-    </section>
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="eyebrow-square"></span> YOUR PEOPLE. YOUR ROOM.</p>
+            <h1>Good calls.<br /><span class="outline-word">Great</span> company.</h1>
+            <div class="hero-bottomline">
+              <p>A small corner of the internet for the people you actually want to talk to.</p>
+              <div class="hero-stamp"><strong>05</strong><span>MAX<br />PEOPLE</span></div>
+            </div>
+          </div>
 
-    <section id="meeting" class="meeting hidden" aria-label="Video meeting">
-      <div class="meeting-bar">
-        <div><div class="eyebrow">YOU'RE IN THE ROOM</div><div id="active-room" class="active-room">—</div></div>
-        <div class="meeting-actions">
-          <button id="copy-link" class="small-button" type="button">COPY INVITE ↗</button>
-          <button id="leave-button" class="leave-button" type="button">LEAVE ROOM</button>
+          <div class="entry-card">
+            <div class="card-head">
+              <div><span class="card-index">01 / START HERE</span><h2>Make it a room.</h2></div>
+              <span class="card-symbol">↗</span>
+            </div>
+            <label class="field-label" for="display-name">YOUR NAME</label>
+            <input id="display-name" class="text-input" type="text" maxlength="28" autocomplete="nickname" placeholder="What should friends call you?" value="" />
+            <div class="join-preferences">
+              <label class="check-option"><input id="start-camera" type="checkbox" checked /><span class="check-box"></span><span>Camera on join</span></label>
+              <label class="check-option"><input id="start-mic" type="checkbox" checked /><span class="check-box"></span><span>Mic on join</span></label>
+            </div>
+            <button class="button button-primary" id="create-room" type="button"><span>CREATE A ROOM</span><b>↗</b></button>
+            <div class="card-divider"><span>OR JOIN YOUR PEOPLE</span></div>
+            <div class="join-row">
+              <input id="room-code" class="text-input code-input" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ENTER 8-CHAR CODE" aria-label="Room code" />
+              <button class="button button-join" id="join-room" type="button" aria-label="Join room"><span>JOIN</span><b>→</b></button>
+            </div>
+            <div class="form-error" id="landing-error" role="alert" aria-live="polite"></div>
+            <p class="invite-safety">ROOMS RUN ON THE PUBLIC JITSI SERVICE. The host may be asked to sign in before guests can join.</p><div class="card-foot"><span><i class="mini-dot"></i> INVITE ONLY</span><span>NO PUBLIC ROOMS</span></div>
+          </div>
         </div>
+
+        <div class="ticker-band" aria-label="Features">
+          <div class="ticker-track"><span>NO DOWNLOADS</span><b>✳</b><span>UP TO FIVE FRIENDS</span><b>✳</b><span>VIDEO / VOICE / CHAT</span><b>✳</b><span>NO IN-APP RECORDING</span><b>✳</b><span>NO DOWNLOADS</span><b>✳</b><span>UP TO FIVE FRIENDS</span><b>✳</b></div>
+        </div>
+
+        <section class="how-section" id="how-it-works">
+          <div class="section-kicker"><span>02 / THE FORMAT</span><span>LESS SETUP. MORE CATCHING UP.</span></div>
+          <div class="how-grid">
+            <article class="how-item"><span class="how-number">01</span><h3>MAKE</h3><p>One person creates a room and gets a private invite code.</p></article>
+            <article class="how-item"><span class="how-number">02</span><h3>SEND</h3><p>Pass the code or invite link to the people you trust.</p></article>
+            <article class="how-item"><span class="how-number">03</span><h3>MEET</h3><p>Everyone joins from a browser. Five seats, one shared space.</p></article>
+          </div>
+        </section>
+        <footer class="landing-footer"><span>ROOM/05 © 2026</span><span>GOOD PEOPLE. GOOD CONNECTION.</span><span>MADE FOR THE MOMENT <b>✳</b></span></footer>
+      </section>
+
+      <section class="call-screen hidden" id="call-screen" aria-label="Video call room">
+        <div class="call-topbar">
+          <a class="brand brand-small" href="/" aria-label="ROOM slash 05"><span class="brand-mark"><span></span><span></span><span></span></span><span>ROOM<span class="brand-slash">/</span>05</span></a>
+          <div class="room-meta"><span class="room-live-indicator"><i></i> LIVE ROOM</span><span class="meta-divider"></span><span class="room-code-label">CODE <strong id="active-room-code">--------</strong></span><button class="icon-text-button" id="copy-code" type="button">COPY ↗</button></div>
+          <div class="call-top-actions"><span class="connection-pill" id="connection-status"><i></i><span>CONNECTING</span></span><button class="square-action" id="share-invite" type="button" title="Share invite link" aria-label="Share invite link">↗</button></div>
+        </div>
+
+        <div class="call-body">
+          <main class="stage-area">
+            <div class="stage-heading"><div><span class="stage-kicker">THE HANGOUT</span><h2>In good company<span class="heading-period">.</span></h2></div><div class="stage-count"><strong id="participant-count">01</strong><span>/ 05<br />CONNECTED</span></div></div>
+            <div class="video-grid" id="video-grid" aria-live="polite"></div>
+            <div class="stage-bottomline"><span><i class="signal-bars"><b></b><b></b><b></b></i> PRIVATE CONNECTION</span><div class="quick-reactions"><span>DROP A REACTION</span><button type="button" data-reaction="👍" aria-label="Thumbs up">👍</button><button type="button" data-reaction="❤️" aria-label="Heart">❤️</button><button type="button" data-reaction="🎉" aria-label="Celebrate">🎉</button><button type="button" data-reaction="👏" aria-label="Clap">👏</button></div><span>YOUR CAMERA, YOUR CALL.</span></div>
+          </main>
+
+          <aside class="side-panel hidden" id="side-panel">
+            <div class="panel-header"><div><span class="stage-kicker" id="panel-kicker">THE ROOM</span><h3 id="panel-title">People <span id="panel-count">01</span></h3></div><button class="close-panel" id="close-panel" type="button" aria-label="Close side panel">×</button></div>
+            <div class="people-view" id="people-view"><div id="participants-list" class="participants-list"></div><div class="panel-note">FIVE SEATS. KEEP IT FRIENDLY.</div></div>
+            <div class="chat-view hidden" id="chat-view">
+              <div class="chat-messages" id="chat-messages"><div class="chat-empty" id="chat-empty"><span>✳</span><strong>Quiet in here.</strong><p>Start the conversation. Messages disappear when the room closes.</p></div></div>
+              <form class="chat-compose" id="chat-form"><input id="chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Say something nice…" aria-label="Chat message" /><button type="submit" aria-label="Send message">↗</button></form>
+              <div class="chat-footnote">BE KIND. THIS CHAT IS LIVE ONLY.</div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="call-footer">
+          <div class="call-footer-left"><span class="footer-room-label">ROOM <b id="footer-room-code">--------</b></span><span class="footer-separator"></span><span class="footer-privacy"><i></i> NOT RECORDING</span></div>
+          <div class="control-dock">
+            <button class="control-button" id="toggle-mic" type="button" aria-pressed="true"><span class="control-icon">♬</span><span class="control-label">MUTE</span></button>
+            <button class="control-button" id="toggle-camera" type="button" aria-pressed="true"><span class="control-icon">▣</span><span class="control-label">CAMERA</span></button>
+            <button class="control-button" id="toggle-screen" type="button" aria-pressed="false"><span class="control-icon">▤</span><span class="control-label">SHARE</span></button>
+            <button class="control-button" id="toggle-hand" type="button" aria-pressed="false"><span class="control-icon">✋</span><span class="control-label">RAISE HAND</span></button>
+            <div class="dock-divider"></div>
+            <button class="control-button utility-control" id="open-people" type="button" aria-label="Show participants"><span class="control-icon">♧</span><span class="control-label">PEOPLE</span><em id="people-badge">1</em></button>
+            <button class="control-button utility-control" id="open-chat" type="button" aria-label="Open chat"><span class="control-icon">▤</span><span class="control-label">CHAT</span></button>
+            <button class="control-button utility-control" id="open-settings" type="button" aria-label="Open device settings"><span class="control-icon">⚙</span><span class="control-label">SETUP</span></button>
+            <button class="leave-button" id="leave-room" type="button"><span>LEAVE</span><b>↗</b></button>
+          </div>
+          <div class="call-footer-right"><span>ROOM/05 <b>✳</b></span></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="settings-overlay hidden" id="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-card">
+        <div class="settings-head"><div><span class="stage-kicker">YOUR HARDWARE</span><h2 id="settings-title">Fine tune<span class="heading-period">.</span></h2></div><button class="close-panel" id="close-settings" type="button" aria-label="Close settings">×</button></div>
+        <label class="field-label" for="audio-input-select">MICROPHONE</label><select class="text-input device-select" id="audio-input-select"><option value="">System default</option></select>
+        <label class="field-label" for="video-input-select">CAMERA</label><select class="text-input device-select" id="video-input-select"><option value="">System default</option></select>
+        <label class="field-label" for="audio-output-select">SPEAKER</label><select class="text-input device-select" id="audio-output-select"><option value="">System default</option></select>
+        <p class="settings-note">Your browser controls device permissions. Some browsers do not support changing the speaker from a webpage.</p>
+        <button class="button button-primary settings-done" id="settings-done" type="button"><span>ALL SET</span><b>✓</b></button>
       </div>
-      <div id="meeting-frame" class="meeting-frame">
-        <div id="meeting-loading" class="meeting-loading" aria-live="polite">
-          <div class="loader" aria-hidden="true"></div>
-          <strong>CONNECTING TO YOUR ROOM</strong>
-          <span id="loading-message">Contacting Jitsi Meet…</span>
-        </div>
-      </div>
-      <p id="meeting-error" class="error meeting-error" role="alert" aria-live="polite"></p>
-      <div class="meeting-note">PUBLIC BETA · MEETINGS ARE PROVIDED BY JITSI. ONLY SHARE YOUR ROOM LINK WITH INVITED PEOPLE.</div>
-    </section>
-  </main>
+    </div>
 
-  <footer><span>ROOM/05 © 2026</span><span>POWERED BY JITSI MEET</span></footer>
-  <script src="/app.js" defer></script>
-</body>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="reaction-floats" id="reaction-floats" aria-hidden="true"></div>
+    <div id="audio-rack" aria-hidden="true"></div>
+    <script src="/main.js?v=2.1.0" defer></script>
+  </body>
 </html>

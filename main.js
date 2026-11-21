@@ -4,6 +4,10 @@
   const $ = (id) => document.getElementById(id);
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const MAX_PEOPLE = 5;
+  const JITSI_DOMAIN = 'meet.jit.si';
+  const JITSI_API_URL = `https://${JITSI_DOMAIN}/external_api.js`;
+  const API_LOAD_TIMEOUT_MS = 15000;
+
   let jitsi = null;
   let currentCode = '';
   let localName = '';
@@ -14,11 +18,14 @@
   let sharingScreen = false;
   let raisedHand = false;
   let toastTimer = null;
+  let enteringRoom = false;
 
   const landing = $('landing-screen');
   const callScreen = $('call-screen');
   const videoGrid = $('video-grid');
   const errorBox = $('landing-error');
+  const createButton = $('create-room');
+  const joinButton = $('join-room');
 
   function toast(message) {
     const el = $('toast');
@@ -26,32 +33,81 @@
     el.textContent = message;
     el.classList.add('visible');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('visible'), 3200);
+    toastTimer = setTimeout(() => el.classList.remove('visible'), 3600);
   }
 
-  function setError(message) { errorBox.textContent = message || ''; }
+  function setError(message) {
+    if (errorBox) errorBox.textContent = message || '';
+  }
 
   function makeCode() {
+    if (!window.crypto || typeof window.crypto.getRandomValues !== 'function') {
+      throw new Error('This browser cannot create a secure room code. Open this site in an up-to-date browser over HTTPS.');
+    }
     const bytes = new Uint8Array(8);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, b => ALPHABET[b % ALPHABET.length]).join('');
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => ALPHABET[byte % ALPHABET.length]).join('');
   }
 
   function cleanName(value) {
     return String(value || '').trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 28);
   }
 
+  function roomNameFor(code) {
+    return 'room05-' + code.toLowerCase();
+  }
+
+  function directRoomUrl(code) {
+    return `https://${JITSI_DOMAIN}/${encodeURIComponent(roomNameFor(code))}`;
+  }
+
+  function setEntryBusy(busy) {
+    enteringRoom = busy;
+    createButton.disabled = busy;
+    joinButton.disabled = busy;
+    createButton.querySelector('span').textContent = busy ? 'CONNECTING…' : 'CREATE A ROOM';
+    joinButton.querySelector('span').textContent = busy ? '…' : 'JOIN';
+    $('display-name').disabled = busy;
+    $('room-code').disabled = busy;
+  }
+
   function loadJitsiApi() {
-    if (window.JitsiMeetExternalAPI) return Promise.resolve();
+    if (typeof window.JitsiMeetExternalAPI === 'function') return Promise.resolve();
+
     if (window.__room05JitsiLoading) return window.__room05JitsiLoading;
+
     window.__room05JitsiLoading = new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://meet.jit.si/external_api.js';
+      let settled = false;
+      const timer = setTimeout(() => finish(new Error('The Jitsi video service did not respond in time. Check your connection and try again.')), API_LOAD_TIMEOUT_MS);
+
+      function finish(error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        script.onload = null;
+        script.onerror = null;
+        if (error) {
+          script.remove();
+          window.__room05JitsiLoading = null;
+          reject(error);
+          return;
+        }
+        if (typeof window.JitsiMeetExternalAPI !== 'function') {
+          window.__room05JitsiLoading = null;
+          reject(new Error('The Jitsi service loaded without its meeting API. Please retry or open the room directly.'));
+          return;
+        }
+        resolve();
+      }
+
+      script.src = JITSI_API_URL;
       script.async = true;
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('Could not load the public Jitsi video service. Check your internet connection and try again.'));
+      script.onload = () => finish();
+      script.onerror = () => finish(new Error('Could not load the Jitsi video service. Check your internet connection or browser content blockers.'));
       document.head.appendChild(script);
     });
+
     return window.__room05JitsiLoading;
   }
 
@@ -62,9 +118,33 @@
     $('footer-room-code').textContent = code;
     $('participant-count').textContent = '01';
     $('people-badge').textContent = '1';
+    $('panel-count').textContent = '01';
     videoGrid.dataset.count = '1';
-    videoGrid.innerHTML = '<div class="jitsi-loading"><span class="loading-mark">05</span><strong>CONNECTING THE ROOM</strong><small>Loading secure audio/video connection…</small></div>';
-    $('connection-status').querySelector('span').textContent = 'CONNECTING';
+    videoGrid.innerHTML = '<div class="jitsi-loading"><span class="loading-mark">05</span><strong>CONNECTING THE ROOM</strong><small>Loading the video meeting…</small></div>';
+    const status = $('connection-status');
+    status.querySelector('span').textContent = 'CONNECTING';
+    status.classList.remove('is-connected', 'is-warning');
+  }
+
+  function showStartupError(code, error) {
+    callScreen.classList.add('hidden');
+    landing.classList.remove('hidden');
+    videoGrid.innerHTML = '';
+    setEntryBusy(false);
+    setError('The embedded video connection could not start. ' + (error && error.message ? error.message : 'Please try again.'));
+
+    const link = document.createElement('a');
+    link.className = 'error-room-link';
+    link.href = directRoomUrl(code);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'OPEN THIS ROOM DIRECTLY ↗';
+    errorBox.append(document.createTextNode(' '), link);
+
+    const help = document.createElement('span');
+    help.className = 'error-room-help';
+    help.textContent = ' The same room code is ' + code + '. The first person may need to sign in to Jitsi.';
+    errorBox.appendChild(help);
   }
 
   function updateParticipants() {
@@ -76,7 +156,7 @@
     const list = $('participants-list');
     list.innerHTML = '';
     const all = [{ id: 'local', name: localName, local: true }, ...Array.from(participants, ([id, name]) => ({ id, name, local: false }))];
-    all.slice(0, MAX_PEOPLE).forEach(person => {
+    all.slice(0, MAX_PEOPLE).forEach((person) => {
       const row = document.createElement('div');
       row.className = 'participant-row';
       const avatar = document.createElement('span');
@@ -105,8 +185,10 @@
   function bindJitsiEvents(api) {
     api.addEventListener('videoConferenceJoined', (event) => {
       localJoined = true;
-      $('connection-status').querySelector('span').textContent = 'CONNECTED';
-      $('connection-status').classList.add('is-connected');
+      const status = $('connection-status');
+      status.querySelector('span').textContent = 'CONNECTED';
+      status.classList.remove('is-warning');
+      status.classList.add('is-connected');
       if (event && event.displayName) localName = event.displayName;
       updateParticipants();
       toast('You are in. Send your room code to your friends.');
@@ -143,8 +225,15 @@
       }
     });
     api.addEventListener('incomingMessage', (event) => {
-      if (!event || !event.message) return;
-      appendChat(event.nick || 'Guest', event.message);
+      if (event && event.message) appendChat(event.nick || 'Guest', event.message);
+    });
+    api.addEventListener('errorOccurred', (event) => {
+      console.error('ROOM/05 Jitsi meeting error:', event);
+      const status = $('connection-status');
+      status.querySelector('span').textContent = 'CHECK JITSI';
+      status.classList.remove('is-connected');
+      status.classList.add('is-warning');
+      toast('Jitsi reported a meeting issue. Try opening the room directly if it does not continue.');
     });
     api.addEventListener('readyToClose', () => leaveRoom(true));
   }
@@ -164,22 +253,44 @@
     list.scrollTop = list.scrollHeight;
   }
 
-  async function enterRoom(code) {
+  async function enterRoom(requestedCode) {
+    if (enteringRoom) return;
     setError('');
+
     const name = cleanName($('display-name').value);
-    if (!name) { setError('Add your name first.'); $('display-name').focus(); return; }
-    if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code)) { setError('Enter a valid 8-character room code.'); return; }
-    if (jitsi) { toast('You are already connected to a room.'); return; }
+    if (!name) {
+      setError('Add your name first.');
+      $('display-name').focus();
+      return;
+    }
+
+    const code = String(requestedCode || '').toUpperCase();
+    if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code)) {
+      setError('Enter a valid 8-character room code (excluding I, O, 0 and 1).');
+      $('room-code').focus();
+      return;
+    }
+
+    if (jitsi) {
+      toast('You are already connected to a room.');
+      return;
+    }
+
     localName = name;
     currentCode = code;
-    showCall(code);
+    setEntryBusy(true);
+
     try {
       await loadJitsiApi();
-      const roomName = 'room05-' + code.toLowerCase();
+      if (typeof window.JitsiMeetExternalAPI !== 'function') {
+        throw new Error('The Jitsi meeting API is unavailable. Please retry.');
+      }
+
+      showCall(code);
       const parentNode = videoGrid;
       videoGrid.innerHTML = '';
-      jitsi = new window.JitsiMeetExternalAPI('meet.jit.si', {
-        roomName,
+      const api = new window.JitsiMeetExternalAPI(JITSI_DOMAIN, {
+        roomName: roomNameFor(code),
         parentNode,
         width: '100%',
         height: '100%',
@@ -193,8 +304,7 @@
           enableWelcomePage: false,
           toolbarButtons: ['settings'],
           tileView: { disabled: false },
-          hideConferenceSubject: true,
-          disableThirdPartyRequests: true
+          hideConferenceSubject: true
         },
         interfaceConfigOverwrite: {
           SHOW_JITSI_WATERMARK: false,
@@ -205,18 +315,36 @@
           TILE_VIEW_MAX_COLUMNS: 3
         }
       });
+
+      if (!api || typeof api.addEventListener !== 'function') {
+        throw new Error('The Jitsi frame could not be initialized.');
+      }
+
+      jitsi = api;
       bindJitsiEvents(jitsi);
-      const iframe = jitsi.getIFrame();
-      iframe.setAttribute('title', 'ROOM/05 Jitsi video meeting');
-      iframe.setAttribute('allow', 'camera; microphone; display-capture; autoplay; clipboard-write; fullscreen');
-      iframe.style.border = '0';
+      const iframe = jitsi.getIFrame && jitsi.getIFrame();
+      if (iframe) {
+        iframe.setAttribute('title', 'ROOM/05 Jitsi video meeting');
+        iframe.setAttribute('allow', 'camera; microphone; display-capture; autoplay; clipboard-write; fullscreen');
+        iframe.style.border = '0';
+      }
+
+      try {
+        const inviteUrl = new URL(location.href);
+        inviteUrl.searchParams.set('room', code);
+        history.replaceState({}, '', inviteUrl.pathname + inviteUrl.search + inviteUrl.hash);
+      } catch (historyError) {
+        // The meeting should still work in restricted webviews that do not expose history URLs.
+        console.warn('ROOM/05 could not update the invite URL:', historyError);
+      }
+      setEntryBusy(false);
     } catch (error) {
       console.error('ROOM/05 Jitsi startup:', error);
-      videoGrid.innerHTML = '<div class="jitsi-loading"><strong>VIDEO SERVICE UNAVAILABLE</strong><small></small><button class="button button-primary" id="retry-jitsi" type="button"><span>TRY AGAIN</span><b>↻</b></button></div>';
-      videoGrid.querySelector('small').textContent = error.message || 'Could not connect to Jitsi.';
-      $('retry-jitsi').addEventListener('click', () => { jitsi = null; enterRoom(code); });
-      $('connection-status').querySelector('span').textContent = 'OFFLINE';
-      jitsi = null;
+      if (jitsi) {
+        try { jitsi.dispose(); } catch (_) {}
+        jitsi = null;
+      }
+      showStartupError(code, error);
     }
   }
 
@@ -229,11 +357,21 @@
     currentCode = '';
     localJoined = false;
     participants.clear();
+    mutedAudio = false;
+    mutedVideo = false;
+    sharingScreen = false;
+    raisedHand = false;
     if (returnToLanding) {
       callScreen.classList.add('hidden');
       landing.classList.remove('hidden');
       videoGrid.innerHTML = '';
-      history.replaceState({}, '', location.pathname);
+      try {
+        const url = new URL(location.href);
+        url.searchParams.delete('room');
+        history.replaceState({}, '', url.pathname + url.search + url.hash);
+      } catch (historyError) {
+        console.warn('ROOM/05 could not reset the invite URL:', historyError);
+      }
     }
   }
 
@@ -246,15 +384,53 @@
     $('panel-title').childNodes[0].textContent = people ? 'People ' : 'Chat ';
   }
 
-  $('create-room').addEventListener('click', () => enterRoom(makeCode()));
-  $('join-room').addEventListener('click', () => enterRoom($('room-code').value.toUpperCase().replace(/[^A-Z0-9]/g, '')));
-  $('room-code').addEventListener('input', (event) => { event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); });
-  $('room-code').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('join-room').click(); });
-  $('copy-code').addEventListener('click', async () => { try { await navigator.clipboard.writeText(currentCode); toast('Room code copied.'); } catch { toast('Your room code is ' + currentCode); } });
-  $('share-invite').addEventListener('click', async () => {
-    const url = new URL(location.href); url.searchParams.set('room', currentCode);
-    try { if (navigator.share) await navigator.share({ title: 'Join my ROOM/05', text: 'Join my video room with code ' + currentCode, url: url.toString() }); else { await navigator.clipboard.writeText(url.toString()); toast('Invite link copied.'); } } catch (_) {}
+  createButton.addEventListener('click', () => {
+    try {
+      enterRoom(makeCode());
+    } catch (error) {
+      setError(error.message || 'Could not create a room code. Please reload the page and try again.');
+    }
   });
+
+  joinButton.addEventListener('click', () => {
+    const code = $('room-code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    enterRoom(code);
+  });
+
+  $('room-code').addEventListener('input', (event) => {
+    event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  });
+  $('room-code').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') joinButton.click();
+  });
+  $('display-name').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') createButton.click();
+  });
+
+  $('copy-code').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(currentCode);
+      toast('Room code copied.');
+    } catch (_) {
+      toast('Your room code is ' + currentCode);
+    }
+  });
+
+  $('share-invite').addEventListener('click', async () => {
+    const url = new URL(location.href);
+    url.searchParams.set('room', currentCode);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Join my ROOM/05', text: 'Join my video room with code ' + currentCode, url: url.toString() });
+      } else {
+        await navigator.clipboard.writeText(url.toString());
+        toast('Invite link copied.');
+      }
+    } catch (_) {
+      toast('Room code: ' + currentCode);
+    }
+  });
+
   $('toggle-mic').addEventListener('click', () => jitsi && jitsi.executeCommand('toggleAudio'));
   $('toggle-camera').addEventListener('click', () => jitsi && jitsi.executeCommand('toggleVideo'));
   $('toggle-screen').addEventListener('click', () => jitsi && jitsi.executeCommand('toggleShareScreen'));
@@ -262,6 +438,7 @@
   $('open-people').addEventListener('click', () => openPanel('people'));
   $('open-chat').addEventListener('click', () => openPanel('chat'));
   $('close-panel').addEventListener('click', () => $('side-panel').classList.add('hidden'));
+
   $('chat-form').addEventListener('submit', (event) => {
     event.preventDefault();
     const input = $('chat-input');
@@ -271,21 +448,33 @@
     appendChat(localName + ' (YOU)', message);
     input.value = '';
   });
-  document.querySelectorAll('[data-reaction]').forEach(button => button.addEventListener('click', () => {
+
+  document.querySelectorAll('[data-reaction]').forEach((button) => button.addEventListener('click', () => {
     if (!jitsi) return;
     const emoji = button.dataset.reaction;
     jitsi.executeCommand('sendChatMessage', emoji);
     toast('Reaction sent: ' + emoji);
   }));
-  $('leave-room').addEventListener('click', () => { if (jitsi) jitsi.executeCommand('hangup'); leaveRoom(); });
+
+  $('leave-room').addEventListener('click', () => {
+    if (jitsi) jitsi.executeCommand('hangup');
+    leaveRoom();
+  });
   $('open-settings').addEventListener('click', () => {
     $('settings-overlay').classList.remove('hidden');
-    toast('Use the small settings control inside the video window to choose devices.');
+    toast('Use the settings control inside the video window to choose devices.');
   });
   $('close-settings').addEventListener('click', () => $('settings-overlay').classList.add('hidden'));
   $('settings-done').addEventListener('click', () => $('settings-overlay').classList.add('hidden'));
 
   const initialCode = new URLSearchParams(location.search).get('room');
-  if (initialCode && /^[A-HJ-NP-Z2-9]{8}$/i.test(initialCode)) $('room-code').value = initialCode.toUpperCase();
-  window.addEventListener('beforeunload', () => { if (jitsi) { try { jitsi.dispose(); } catch (_) {} } });
+  if (initialCode && /^[A-HJ-NP-Z2-9]{8}$/i.test(initialCode)) {
+    $('room-code').value = initialCode.toUpperCase();
+  }
+
+  window.addEventListener('beforeunload', () => {
+    if (jitsi) {
+      try { jitsi.dispose(); } catch (_) {}
+    }
+  });
 })();

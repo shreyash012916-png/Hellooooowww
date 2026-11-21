@@ -83,7 +83,9 @@ h1 { font-size: clamp(66px, 8.2vw, 124px); letter-spacing: -.09em; line-height: 
 .code-input { letter-spacing: .14em; font-weight: 500; }
 .button-join { background: var(--ink); color: var(--paper-2); display: flex; align-items: center; justify-content: space-between; padding: 0 13px; }
 .button-join b { font-size: 17px; color: var(--acid); font-weight: 400; }
-.form-error { min-height: 18px; margin: 10px 0 3px; color: #b83d28; font: 10px/1.5 var(--mono); }
+.form-error { min-height: 18px; margin: 10px 0 3px; color: #b83d28; font: 10px/1.5 var(--mono); overflow-wrap: anywhere; }
+.error-room-link { display: inline-block; margin-top: 7px; color: var(--ink); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.error-room-help { display: inline-block; margin-top: 5px; color: #77786f; }
 .card-foot { border-top: 1px solid var(--line); padding-top: 14px; display: flex; align-items: center; justify-content: space-between; color: #898a81; font-size: 8px; }
 .card-foot > span:first-child { display: flex; align-items: center; gap: 7px; }
 .card-foot .mini-dot { width: 5px; height: 5px; }
