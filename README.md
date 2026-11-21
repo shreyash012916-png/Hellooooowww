@@ -1,4 +1,4 @@
-# ROOM/05 — Free peer-to-peer video rooms
+# ROOM/05 — Free peer-to-peer video rooms (v4)
 
 Direct browser-to-browser video, voice, chat and screen sharing (WebRTC).
 No Jitsi, no LiveKit, no API keys, no accounts, no database.
@@ -6,6 +6,15 @@ No Jitsi, no LiveKit, no API keys, no accounts, no database.
 The small Node server only (1) serves the website and (2) passes tiny
 "signaling" messages so browsers can find each other. Audio and video never
 go through the server.
+
+## What's new in v4
+
+- 7 theme options (Auto follows your device, Cream, Midnight, Grape, Sunset, Bubblegum, Matcha), saved per device.
+- Clean touch/click feedback: no blue boxes, smooth press animations, haptics on supported phones.
+- Sharper, smoother video: adaptive 1080p/720p/540p by room size, high-bitrate encoding, screen share tuned for text detail, 48 kHz noise-suppressed audio. Quality picker in Setup.
+- Live connection indicator (latency + signal strength), auto-reconnect, screen wake-lock, ICE recovery.
+- Gen Z touches: reactions (🔥💀😭✨❤️🎉), confetti hype for everyone, 📸 group-photo snap, pin/spotlight, fullscreen tile, join/leave sounds, keyboard shortcuts (M V S H C P F).
+- Faster loading: gzip + caching, preconnected fonts.
 
 ## Deploy (GitHub + Render)
 

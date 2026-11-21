@@ -29,6 +29,88 @@
   let retryCount = 0;
   let toastTimer = null;
   let audioCtx = null;
+  let wakeLock = null;
+  let pinnedId = null;
+  let hbTimer = null, lastPong = 0, statsTimer = null;
+
+  // ---------- preferences ----------
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('room05-' + k); return v === null ? d : v; } catch (_) { return d; } },
+    set(k, v) { try { localStorage.setItem('room05-' + k, v); } catch (_) {} }
+  };
+  const prefs = { quality: store.get('quality', 'auto'), mirror: store.get('mirror', '1') === '1', sound: store.get('sound', '1') === '1' };
+
+  const THEMES = [
+    ['auto', 'Auto'], ['cream', 'Cream'], ['midnight', 'Midnight'], ['grape', 'Grape'],
+    ['sunset', 'Sunset'], ['bubblegum', 'Bubblegum'], ['matcha', 'Matcha']
+  ];
+  const THEME_COLORS = { cream: ['#e9e6dc', '#d9ff00'], midnight: ['#0f110e', '#d9ff00'], grape: ['#130e1f', '#c59bff'], sunset: ['#1a0e12', '#ffb347'], bubblegum: ['#ffe0ed', '#ff8bd1'], matcha: ['#dce9d2', '#9dff6a'] };
+  function applyTheme(choice) {
+    let t = choice;
+    if (t === 'auto') t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'midnight' : 'cream';
+    document.documentElement.dataset.theme = t;
+    const meta = $('meta-theme'); if (meta) meta.content = THEME_COLORS[t][0];
+    store.set('theme', choice);
+    document.querySelectorAll('.theme-chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.theme === choice)));
+  }
+  function buildThemePickers() {
+    document.querySelectorAll('.theme-swatches').forEach((box) => {
+      box.innerHTML = '';
+      THEMES.forEach(([id, label]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'theme-chip' + (id === 'auto' ? ' auto' : ''); b.dataset.theme = id;
+        b.title = label; b.setAttribute('aria-label', label + ' theme');
+        if (THEME_COLORS[id]) { b.style.setProperty('--c1', THEME_COLORS[id][0]); b.style.setProperty('--c2', THEME_COLORS[id][1]); }
+        b.addEventListener('click', () => { applyTheme(id); buzz(); });
+        box.appendChild(b);
+      });
+    });
+    applyTheme(store.get('theme', 'auto'));
+    document.querySelectorAll('.theme-wrap').forEach((wrap) => {
+      const btn = wrap.querySelector('.theme-toggle'); const pop = wrap.querySelector('.theme-pop');
+      btn.addEventListener('click', (e) => { e.stopPropagation(); const open = pop.classList.toggle('hidden') === false; btn.setAttribute('aria-expanded', String(open)); });
+    });
+    document.addEventListener('click', (e) => { document.querySelectorAll('.theme-pop').forEach((p) => { if (!p.contains(e.target)) p.classList.add('hidden'); }); });
+    if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (store.get('theme', 'auto') === 'auto') applyTheme('auto'); });
+  }
+
+  // tiny haptics + sound blips (no audio files needed)
+  function buzz(ms) { if (prefs.sound && navigator.vibrate) { try { navigator.vibrate(ms || 8); } catch (_) {} } }
+  function blip(kind) {
+    if (!prefs.sound) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const notes = kind === 'join' ? [660, 880] : kind === 'leave' ? [660, 440] : [880];
+      notes.forEach((f, i) => {
+        const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        const t0 = audioCtx.currentTime + i * 0.11;
+        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.09, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+        o.connect(g); g.connect(audioCtx.destination); o.start(t0); o.stop(t0 + 0.16);
+      });
+    } catch (_) {}
+  }
+  document.addEventListener('pointerdown', (e) => { if (e.target.closest && e.target.closest('button')) buzz(6); }, { passive: true });
+
+  // ---------- quality presets ----------
+  function qualityFor(peerCount) {
+    const q = prefs.quality;
+    if (q === 'max') return { w: 1920, h: 1080, fps: 30, bitrate: 4500000 };
+    if (q === 'data') return { w: 640, h: 360, fps: 24, bitrate: 450000 };
+    if (q === 'hd') return { w: 1280, h: 720, fps: 30, bitrate: 2200000 };
+    // auto: the more people, the more everyone uploads, so share the upload budget
+    if (peerCount <= 1) return { w: 1920, h: 1080, fps: 30, bitrate: 4000000 };
+    if (peerCount === 2) return { w: 1280, h: 720, fps: 30, bitrate: 2200000 };
+    if (peerCount === 3) return { w: 1280, h: 720, fps: 30, bitrate: 1600000 };
+    return { w: 960, h: 540, fps: 30, bitrate: 1100000 };
+  }
+  function retuneAll() {
+    const q = qualityFor(peers.size);
+    peers.forEach((p) => { if (p.vsender) tuneVideoSender(p.vsender); });
+    const t = cameraTrack();
+    if (t && t.applyConstraints) t.applyConstraints({ width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps, max: q.fps } }).catch(() => {});
+  }
 
   // ---------- helpers ----------
   function toast(message) {
@@ -76,8 +158,9 @@
 
   // ---------- local media ----------
   async function getLocalMedia() {
-    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-    const video = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' };
+    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 48000 };
+    const qq = qualityFor(1);
+    const video = { width: { ideal: qq.w }, height: { ideal: qq.h }, frameRate: { ideal: qq.fps, max: qq.fps }, facingMode: 'user' };
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('Camera and microphone need HTTPS and an up-to-date browser.');
     }
@@ -97,6 +180,7 @@
 
   function applyInitialPrefs() {
     const a = audioTrack(); const v = cameraTrack();
+    if (v) { try { v.contentHint = 'motion'; } catch (_) {} }
     state.mic = !!a && $('start-mic').checked;
     state.cam = !!v && $('start-camera').checked;
     if (a) a.enabled = state.mic;
@@ -176,7 +260,15 @@
     hand.className = 'hand-flag hidden';
     hand.textContent = '✋ HAND UP';
     flags.append(role, hand);
-    stage.append(ph, layer, ring, flags);
+    const actions = document.createElement('div');
+    actions.className = 'tile-actions';
+    const pin = document.createElement('button'); pin.type = 'button'; pin.textContent = '📌'; pin.title = 'Pin / spotlight'; pin.setAttribute('aria-label', 'Pin tile');
+    pin.addEventListener('click', (e) => { e.stopPropagation(); togglePin(id); });
+    const fs = document.createElement('button'); fs.type = 'button'; fs.textContent = '⛶'; fs.title = 'Fullscreen'; fs.setAttribute('aria-label', 'Fullscreen tile');
+    fs.addEventListener('click', (e) => { e.stopPropagation(); tileFullscreen(tile); });
+    actions.append(pin, fs);
+    stage.append(ph, layer, ring, flags, actions);
+    tile.addEventListener('dblclick', () => tileFullscreen(tile));
     const footer = document.createElement('div');
     footer.className = 'tile-footer';
     const person = document.createElement('div');
@@ -210,6 +302,19 @@
     s.classList.toggle('muted', !st.mic);
   }
 
+  function togglePin(id) {
+    pinnedId = pinnedId === id ? null : id;
+    layoutGrid();
+    toast(pinnedId ? 'Spotlight on.' : 'Spotlight off.');
+  }
+  function tileFullscreen(tile) {
+    try {
+      if (document.fullscreenElement) { document.exitFullscreen(); return; }
+      const fn = tile.requestFullscreen || tile.webkitRequestFullscreen;
+      if (fn) fn.call(tile); else { const v = tile.querySelector('video'); if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); }
+    } catch (_) {}
+  }
+
   let localTile = null;
   function renderLocalTile() {
     if (!localTile) return;
@@ -218,7 +323,7 @@
     if (vt) display.addTrack(vt);
     const v = localTile.querySelector('video');
     if (!v.srcObject || v.dataset.vt !== (vt ? vt.id : '')) { v.srcObject = display; v.dataset.vt = vt ? vt.id : ''; }
-    v.classList.toggle('self-video', !state.screen);
+    v.classList.toggle('self-video', !state.screen && prefs.mirror);
     const hasVideo = !!vt && vt.readyState === 'live' && (state.cam || state.screen);
     localTile.classList.toggle('no-video', !hasVideo);
     localTile.querySelector('.hand-flag').classList.toggle('hidden', !state.hand);
@@ -240,6 +345,8 @@
     $('participant-count').textContent = pad(count);
     $('people-badge').textContent = String(count);
     $('panel-count').textContent = pad(count);
+    videoGrid.classList.toggle('has-pin', !!pinnedId && count > 1);
+    videoGrid.querySelectorAll('.video-tile').forEach((t) => t.classList.toggle('pinned', !!pinnedId && count > 1 && t.dataset.id === pinnedId));
     const note = videoGrid.querySelector('.loading-note');
     if (note) note.remove();
   }
@@ -274,7 +381,7 @@
     peers.set(id, p);
 
     const at = audioTrack();
-    if (at) p.asender = pc.addTrack(at, localStream);
+    if (at) { p.asender = pc.addTrack(at, localStream); tuneAudioSender(p.asender); }
     const vt = outgoingVideoTrack();
     if (vt) { p.vsender = pc.addTrack(vt, localStream); tuneVideoSender(p.vsender); }
 
@@ -308,6 +415,7 @@
     pc.onconnectionstatechange = () => {
       p.connState = pc.connectionState;
       renderPeerTile(p);
+      if (pc.connectionState === 'disconnected') { setTimeout(() => { if (peers.get(id) === p && pc.connectionState === 'disconnected') { try { pc.restartIce(); } catch (_) {} } }, 4000); }
       if (pc.connectionState === 'failed') {
         try { pc.restartIce(); } catch (_) {}
         toast(p.name + ': connection is struggling — retrying. Strict networks may need a TURN relay.');
@@ -322,14 +430,28 @@
       layoutGrid();
     }
     renderPeople();
+    retuneAll();
     return p;
   }
 
   function tuneVideoSender(sender) {
     try {
+      const q = qualityFor(peers.size);
       const params = sender.getParameters();
       if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-      params.encodings[0].maxBitrate = 2500000;
+      params.encodings[0].maxBitrate = state.screen ? Math.max(q.bitrate, 3000000) : q.bitrate;
+      params.encodings[0].maxFramerate = q.fps;
+      params.encodings[0].networkPriority = 'high';
+      params.degradationPreference = state.screen ? 'maintain-resolution' : 'balanced';
+      sender.setParameters(params).catch(() => {});
+    } catch (_) {}
+  }
+  function tuneAudioSender(sender) {
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+      params.encodings[0].maxBitrate = 64000;
+      params.encodings[0].priority = 'high';
       sender.setParameters(params).catch(() => {});
     } catch (_) {}
   }
@@ -365,8 +487,11 @@
     try { p.pc.close(); } catch (_) {}
     if (p.tile) p.tile.remove();
     peers.delete(id);
+    if (pinnedId === id) pinnedId = null;
     layoutGrid();
     renderPeople();
+    retuneAll();
+    blip('leave');
     toast(p.name + ' left the room.');
   }
 
@@ -400,18 +525,20 @@
       case 'peer-joined': {
         const p = createPeer(m.id, m.name);
         p.state = { mic: true, cam: true, screen: false, hand: false };
+        blip('join');
         toast(m.name + ' joined.');
         sendMyStateTo();
         break;
       }
       case 'peer-left': removePeer(m.id); break;
+      case 'pong': lastPong = Date.now(); break;
       case 'signal': handleSignal(m.from, m.data); break;
       case 'state': {
         const p = peers.get(m.id);
         if (p) { p.state = m.state; renderPeerTile(p); renderPeople(); }
         break;
       }
-      case 'chat': appendChat(m.name, m.text); notifyChat(); break;
+      case 'chat': appendChat(m.name, m.text); notifyChat(); blip('ping'); break;
       case 'reaction': floatReaction(m.emoji, m.name); break;
       default: break;
     }
@@ -442,6 +569,44 @@
       toast('Reconnected.');
     } catch (_) { attemptReconnect(); }
   }
+
+  // ---------- robustness: heartbeat, wake lock, stats ----------
+  function startHeartbeat() {
+    stopHeartbeat(); lastPong = Date.now();
+    hbTimer = setInterval(() => {
+      if (!ws || ws.readyState !== 1) return;
+      if (Date.now() - lastPong > 50000) { try { ws.close(); } catch (_) {} return; }
+      ws.send(JSON.stringify({ type: 'ping' }));
+    }, 15000);
+  }
+  function stopHeartbeat() { clearInterval(hbTimer); hbTimer = null; }
+  async function acquireWakeLock() { try { if (navigator.wakeLock && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (_) {} }
+  function releaseWakeLock() { try { if (wakeLock) wakeLock.release(); } catch (_) {} wakeLock = null; }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && inRoom) { acquireWakeLock(); if (ws && ws.readyState !== 1) { try { ws.close(); } catch (_) {} } } });
+  window.addEventListener('online', () => { if (inRoom) { toast('Back online — reconnecting…'); if (ws && ws.readyState !== 1) { try { ws.close(); } catch (_) {} } } });
+  window.addEventListener('offline', () => { if (inRoom) { setStatus('OFFLINE', 'warn'); toast('You are offline.'); } });
+
+  function startStats() {
+    stopStats();
+    statsTimer = setInterval(async () => {
+      let worstRtt = 0, any = false, lossHigh = false;
+      for (const p of peers.values()) {
+        try {
+          const stats = await p.pc.getStats();
+          stats.forEach((r) => {
+            if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated && typeof r.currentRoundTripTime === 'number') { any = true; worstRtt = Math.max(worstRtt, r.currentRoundTripTime * 1000); }
+            if (r.type === 'inbound-rtp' && r.kind === 'video' && r.packetsReceived > 100 && r.packetsLost / (r.packetsReceived + r.packetsLost) > 0.08) lossHigh = true;
+          });
+        } catch (_) {}
+      }
+      if (!inRoom || ws == null || ws.readyState !== 1) return;
+      if (!peers.size) { setStatus('CONNECTED', 'ok'); return; }
+      if (!any) { setStatus('LINKING', ''); return; }
+      const ms = Math.round(worstRtt);
+      setStatus((lossHigh ? 'WEAK ' : ms < 120 ? 'GREAT ' : 'OK ') + ms + 'ms', lossHigh || ms > 300 ? 'warn' : 'ok');
+    }, 3000);
+  }
+  function stopStats() { clearInterval(statsTimer); statsTimer = null; }
 
   // ---------- enter / leave ----------
   function showCall(code) {
@@ -483,6 +648,7 @@
       const { sock, joined } = await openSocket();
       ws = sock; myId = joined.id; inRoom = true;
       setStatus('CONNECTED', 'ok');
+      startHeartbeat(); startStats(); acquireWakeLock(); document.body.classList.add('in-call');
       joined.peers.forEach((pr) => {
         const p = createPeer(pr.id, pr.name);
         if (pr.state && Object.keys(pr.state).length) p.state = pr.state;
@@ -517,6 +683,8 @@
 
   function leaveRoom() {
     leaving = true; inRoom = false;
+    stopHeartbeat(); stopStats(); releaseWakeLock(); document.body.classList.remove('in-call'); pinnedId = null;
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (_) {} }
     if (ws) { const s = ws; ws = null; try { s.close(); } catch (_) {} }
     closeAllPeers();
     cleanupMedia();
@@ -558,6 +726,7 @@
     if (screenStream) { screenStream.getTracks().forEach((t) => t.stop()); screenStream = null; }
     state.screen = false;
     await setOutgoingVideo(cameraTrack());
+    peers.forEach((p) => { if (p.vsender) tuneVideoSender(p.vsender); });
     syncButtons(); broadcastState();
   }
 
@@ -567,9 +736,11 @@
     try {
       screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 } }, audio: false });
       const track = screenStream.getVideoTracks()[0];
+      try { track.contentHint = 'detail'; } catch (_) {}
       track.onended = () => { if (state.screen) stopScreenShare(); };
       state.screen = true;
       await setOutgoingVideo(track);
+      peers.forEach((p) => { if (p.vsender) tuneVideoSender(p.vsender); });
       syncButtons(); broadcastState();
     } catch (e) { screenStream = null; if (e && e.name !== 'NotAllowedError') toast('Could not start screen sharing.'); }
   });
@@ -620,7 +791,26 @@
     const sm = document.createElement('small'); sm.textContent = name || ''; el.appendChild(sm);
     box.appendChild(el);
     setTimeout(() => el.remove(), 2700);
+    if (emoji === '🎉') confetti();
+    else if (box.children.length > 12) box.firstChild.remove();
   }
+  function confetti() {
+    try {
+      const c = document.createElement('canvas'); c.className = 'confetti';
+      c.width = innerWidth; c.height = innerHeight; document.body.appendChild(c);
+      const ctx = c.getContext('2d');
+      const css = getComputedStyle(document.documentElement);
+      const colors = [css.getPropertyValue('--acid').trim(), css.getPropertyValue('--red').trim(), css.getPropertyValue('--blue').trim(), '#ffffff', '#ffd23f'];
+      const bits = Array.from({ length: 140 }, () => ({ x: innerWidth / 2, y: innerHeight * 0.75, vx: (Math.random() - 0.5) * 16, vy: -Math.random() * 18 - 6, s: Math.random() * 7 + 4, r: Math.random() * 6.3, vr: (Math.random() - 0.5) * 0.4, c: colors[(Math.random() * colors.length) | 0] }));
+      const t0 = performance.now();
+      (function frame(now) {
+        const age = now - t0; ctx.clearRect(0, 0, c.width, c.height);
+        bits.forEach((b) => { b.vy += 0.5; b.x += b.vx; b.y += b.vy; b.r += b.vr; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.r); ctx.fillStyle = b.c; ctx.globalAlpha = Math.max(0, 1 - age / 2600); ctx.fillRect(-b.s / 2, -b.s / 2, b.s, b.s * 0.6); ctx.restore(); });
+        if (age < 2600) requestAnimationFrame(frame); else c.remove();
+      })(t0);
+    } catch (_) {}
+  }
+
   document.querySelectorAll('[data-reaction]').forEach((b) => b.addEventListener('click', () => {
     if (!ws || ws.readyState !== 1) return;
     const emoji = b.dataset.reaction;
@@ -665,7 +855,7 @@
     try {
       const constraints = kind === 'audio'
         ? { audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
-        : { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } } };
+        : { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: qualityFor(peers.size).w }, height: { ideal: qualityFor(peers.size).h }, frameRate: { ideal: 30, max: 30 } } };
       const fresh = await navigator.mediaDevices.getUserMedia(constraints);
       const track = fresh.getTracks()[0];
       const old = kind === 'audio' ? audioTrack() : cameraTrack();
@@ -689,6 +879,62 @@
   $('open-settings').addEventListener('click', () => { refreshDevices(); $('settings-overlay').classList.remove('hidden'); });
   $('close-settings').addEventListener('click', () => $('settings-overlay').classList.add('hidden'));
   $('settings-done').addEventListener('click', () => $('settings-overlay').classList.add('hidden'));
+
+  $('quality-select').value = prefs.quality;
+  $('quality-select').addEventListener('change', (e) => { prefs.quality = e.target.value; store.set('quality', prefs.quality); retuneAll(); toast('Video quality: ' + e.target.options[e.target.selectedIndex].text); });
+  $('opt-mirror').checked = prefs.mirror;
+  $('opt-mirror').addEventListener('change', (e) => { prefs.mirror = e.target.checked; store.set('mirror', prefs.mirror ? '1' : '0'); renderLocalTile(); });
+  $('opt-sound').checked = prefs.sound;
+  $('opt-sound').addEventListener('change', (e) => { prefs.sound = e.target.checked; store.set('sound', prefs.sound ? '1' : '0'); });
+
+  // snap a group photo (collage of everyone's current frame)
+  $('snap-photo').addEventListener('click', () => {
+    try {
+      const vids = Array.from(videoGrid.querySelectorAll('.video-tile')).map((t) => ({ v: t.querySelector('video'), name: t.querySelector('.tile-name').textContent, off: t.classList.contains('no-video') }));
+      if (!vids.length) return;
+      const cols = vids.length === 1 ? 1 : vids.length <= 4 ? 2 : 3;
+      const rows = Math.ceil(vids.length / cols);
+      const cw = 640, ch = 360, pad = 12, head = 56;
+      const c = document.createElement('canvas');
+      c.width = cols * cw + (cols + 1) * pad; c.height = rows * ch + (rows + 1) * pad + head;
+      const ctx = c.getContext('2d');
+      const css = getComputedStyle(document.documentElement);
+      ctx.fillStyle = css.getPropertyValue('--paper').trim() || '#e9e6dc'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.fillStyle = css.getPropertyValue('--ink').trim() || '#171916'; ctx.font = '700 26px sans-serif';
+      ctx.fillText('ROOM/05  ·  ' + currentCode + '  ·  ' + new Date().toLocaleString(), pad, 38);
+      vids.forEach((o, i) => {
+        const x = pad + (i % cols) * (cw + pad), y = head + pad + Math.floor(i / cols) * (ch + pad);
+        ctx.fillStyle = '#20231f'; ctx.fillRect(x, y, cw, ch);
+        if (!o.off && o.v.videoWidth) {
+          const r = Math.max(cw / o.v.videoWidth, ch / o.v.videoHeight), w = o.v.videoWidth * r, h = o.v.videoHeight * r;
+          ctx.save(); ctx.beginPath(); ctx.rect(x, y, cw, ch); ctx.clip(); ctx.drawImage(o.v, x + (cw - w) / 2, y + (ch - h) / 2, w, h); ctx.restore();
+        }
+        ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x, y + ch - 36, cw, 36);
+        ctx.fillStyle = '#fff'; ctx.font = '600 20px sans-serif'; ctx.fillText(o.name, x + 12, y + ch - 11);
+      });
+      const flash = document.createElement('div'); flash.className = 'snap-flash'; document.body.appendChild(flash); setTimeout(() => flash.remove(), 500);
+      c.toBlob((blob) => {
+        if (!blob) return;
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'room05-' + Date.now() + '.png';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        toast('Group photo saved 📸');
+      }, 'image/png');
+    } catch (e) { toast('Could not take the photo.'); }
+  });
+
+  // keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (!inRoom || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    const k = e.key.toLowerCase();
+    const map = { m: 'toggle-mic', v: 'toggle-camera', s: 'toggle-screen', h: 'toggle-hand', c: 'open-chat', p: 'open-people' };
+    if (map[k]) { e.preventDefault(); $(map[k]).click(); }
+    else if (k === 'f') { e.preventDefault(); tileFullscreen(videoGrid.querySelector('.video-tile.pinned') || localTile); }
+    else if (k === 'escape') { $('settings-overlay').classList.add('hidden'); }
+  });
+
+  buildThemePickers();
 
   // ---------- landing wiring ----------
   createButton.addEventListener('click', () => {

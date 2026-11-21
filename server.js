@@ -10,12 +10,13 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const { WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT || 3000);
 const MAX_PEOPLE = Math.max(2, Number(process.env.MAX_PEOPLE || 5));
 const ROOT = __dirname;
-const PUBLIC_FILES = new Set(['index.html', 'style.css', 'main.js', 'favicon.svg']);
+const PUBLIC_FILES = ['index.html', 'style.css', 'main.js', 'favicon.svg'];
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -47,6 +48,15 @@ function send(res, status, body, type = 'text/plain; charset=utf-8', extra = {})
   res.end(data);
 }
 
+// Load, hash and pre-compress the site once at startup so every request is instant.
+const ASSETS = new Map();
+for (const file of PUBLIC_FILES) {
+  try {
+    const raw = fs.readFileSync(path.join(ROOT, file));
+    ASSETS.set(file, { raw, gz: zlib.gzipSync(raw, { level: 9 }), type: MIME[path.extname(file)], etag: '"' + crypto.createHash('sha1').update(raw).digest('hex').slice(0, 16) + '"' });
+  } catch (e) { console.error('Missing file', file); }
+}
+
 const server = http.createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
   let pathname;
@@ -56,16 +66,19 @@ const server = http.createServer((req, res) => {
   if (pathname === '/config') return send(res, 200, JSON.stringify({ iceServers: iceServers(), maxPeople: MAX_PEOPLE }), 'application/json; charset=utf-8');
 
   const name = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
-  if (!PUBLIC_FILES.has(name)) return send(res, 404, 'Not found');
-  fs.readFile(path.join(ROOT, name), (err, data) => {
-    if (err) return send(res, 404, 'Not found');
-    send(res, 200, req.method === 'HEAD' ? '' : data, MIME[path.extname(name)] || 'application/octet-stream');
-  });
+  const asset = ASSETS.get(name);
+  if (!asset) return send(res, 404, 'Not found');
+  if (req.headers['if-none-match'] === asset.etag) return send(res, 304, '', asset.type, { ETag: asset.etag });
+  const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  const body = gz ? asset.gz : asset.raw;
+  const extra = { ETag: asset.etag, Vary: 'Accept-Encoding', 'Cache-Control': 'public, max-age=0, must-revalidate' };
+  if (gz) extra['Content-Encoding'] = 'gzip';
+  send(res, 200, req.method === 'HEAD' ? '' : body, asset.type, extra);
 });
 
 // ---------- signaling ----------
 const rooms = new Map(); // code -> Map(id -> {ws, name})
-const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
 
 server.on('upgrade', (req, socket, head) => {
   let url;
@@ -87,6 +100,11 @@ wss.on('connection', (ws) => {
     let m;
     try { m = JSON.parse(raw.toString()); } catch { return; }
     if (!m || typeof m.type !== 'string') return;
+    // light rate limit: 400 messages / 10s per connection (ICE bursts are well under this)
+    const now = Date.now();
+    if (now - (ws.winStart || 0) > 10000) { ws.winStart = now; ws.winCount = 0; }
+    if (++ws.winCount > 400) return;
+    if (m.type === 'ping') return out(ws, { type: 'pong' });
 
     if (m.type === 'join' && !room) {
       const code = clean(m.room, 8).toUpperCase();
@@ -142,5 +160,12 @@ setInterval(() => {
     try { ws.ping(); } catch (_) {}
   });
 }, 25000);
+
+server.keepAliveTimeout = 65000;
+const shutdown = () => { wss.clients.forEach((c) => { try { c.close(1001); } catch (_) {} }); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000); };
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+process.on('uncaughtException', (e) => console.error('uncaught', e));
+process.on('unhandledRejection', (e) => console.error('unhandled', e));
 
 server.listen(PORT, '0.0.0.0', () => console.log(`ROOM/05 (P2P) listening on port ${PORT}, max ${MAX_PEOPLE} per room`));
