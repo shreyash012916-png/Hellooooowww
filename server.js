@@ -13,7 +13,12 @@ const ROOM_PREFIX = 'ROOM05-';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function send(res, status, body, headers = {}) {
-  const data = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
+  // Static files arrive from fs.readFile as Buffers. Preserve their bytes;
+  // JSON.stringify(Buffer) would turn the HTML into a tiny JSON object and
+  // make browsers display it as text instead of rendering the page.
+  const data = Buffer.isBuffer(body) || ArrayBuffer.isView(body)
+    ? Buffer.from(body)
+    : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
   res.writeHead(status, {
     'Content-Length': data.length,
     'X-Content-Type-Options': 'nosniff',

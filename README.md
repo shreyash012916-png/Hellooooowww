@@ -1,6 +1,6 @@
 # ROOM/05 — GitHub + Render
 
-A private browser video-room app. LiveKit Cloud provides the WebRTC media infrastructure; this Node server creates signed room tokens and enforces a five-participant room limit through LiveKit's RoomService.
+A private browser video-room app. LiveKit Cloud provides the WebRTC media infrastructure; this Node server creates signed room tokens and enforces a five-participant room limit through LiveKit's RoomService. Static HTML/CSS/JS files are served as their original bytes with the correct content types.
 
 ## Files
 
@@ -31,3 +31,8 @@ All application files are at the repository root (no nested source folders): `in
 - Browser camera/microphone access requires HTTPS; Render provides HTTPS on its service URL.
 - The five-person maximum is set when creating the LiveKit room. The join API also checks the current participant count before issuing a token. LiveKit's room-level maximum is the final enforcement.
 - Chat is sent over LiveKit data messages and is not stored by this app. No recording feature is included.
+
+
+## If you already deployed the previous ZIP
+
+Upload the corrected files from this ZIP to the same GitHub repository (replace the existing files at the repository root), commit the changes, and let Render redeploy. Keep the existing Render Environment variables. No change to the Build Command (`npm install`) or Start Command (`npm start`) is needed.
