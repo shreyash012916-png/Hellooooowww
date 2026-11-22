@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" id="meta-theme" content="#e9e6dc" />
-    <script>try{var t=localStorage.getItem("room05-theme")||"auto";if(t==="auto")t=matchMedia("(prefers-color-scheme: dark)").matches?"midnight":"cream";document.documentElement.dataset.theme=t;}catch(e){}</script>
+    <script>try{var t=localStorage.getItem("room05-theme")||"auto";if(t==="auto")t=matchMedia("(prefers-color-scheme: dark)").matches?"midnight":"cream";document.documentElement.dataset.theme=t;document.documentElement.dataset.mode=/^(midnight|grape|sunset|cyber|terminal|vapor|aurora)$/.test(t)?"dark":"light";}catch(e){}</script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
@@ -21,7 +21,7 @@
         <span>ROOM<span class="brand-slash">/</span>05</span>
       </a>
       <div class="header-center"><span class="live-dot"></span> SMALL ROOMS. BIG ENERGY.</div>
-      <div class="header-tools"><a class="header-link" href="#how-it-works">HOW IT WORKS <span>↘</span></a><div class="theme-wrap"><button class="square-action theme-toggle" type="button" title="Themes" aria-label="Change theme" aria-expanded="false">🎨</button><div class="theme-pop hidden"><span class="theme-label">PICK YOUR VIBE</span><div class="theme-swatches"></div></div></div></div>
+      <div class="header-tools"><a class="header-link" href="#how-it-works">HOW IT WORKS <span>↘</span></a><button class="square-action mode-toggle" type="button" title="Switch light / dark" aria-label="Switch between light and dark mode"></button><div class="theme-wrap"><button class="square-action theme-toggle" type="button" title="Themes" aria-label="Change theme" aria-expanded="false">🎨</button><div class="theme-pop hidden"><span class="theme-label">PICK YOUR VIBE</span><div class="theme-swatches"></div></div></div></div>
     </header>
 
     <main>
@@ -80,16 +80,16 @@
 
       <section class="call-screen hidden" id="call-screen" aria-label="Video call room">
         <div class="call-topbar">
-          <a class="brand brand-small" href="/" aria-label="ROOM slash 05"><span class="brand-mark"><span></span><span></span><span></span></span><span>ROOM<span class="brand-slash">/</span>05</span></a>
+          <a class="brand brand-small" href="/" aria-label="ROOM slash 05"><span class="brand-mark"><span></span><span></span><span></span></span><span class="brand-text">ROOM<span class="brand-slash">/</span>05</span></a>
           <div class="room-meta"><span class="room-live-indicator"><i></i> LIVE ROOM</span><span class="meta-divider"></span><span class="room-code-label">CODE <strong id="active-room-code">--------</strong></span><button class="icon-text-button" id="copy-code" type="button">COPY ↗</button></div>
-          <div class="call-top-actions"><span class="connection-pill" id="connection-status"><i></i><span>CONNECTING</span></span><button class="square-action" id="snap-photo" type="button" title="Snap a group photo" aria-label="Snap a group photo">📸</button><div class="theme-wrap"><button class="square-action theme-toggle" type="button" title="Themes" aria-label="Change theme" aria-expanded="false">🎨</button><div class="theme-pop hidden"><span class="theme-label">PICK YOUR VIBE</span><div class="theme-swatches"></div></div></div><button class="square-action" id="share-invite" type="button" title="Share invite link" aria-label="Share invite link">↗</button></div>
+          <div class="call-top-actions"><span class="connection-pill" id="connection-status"><i></i><span>CONNECTING</span></span><button class="square-action" id="snap-photo" type="button" title="Snap a group photo" aria-label="Snap a group photo">📸</button><button class="square-action mode-toggle" type="button" title="Switch light / dark" aria-label="Switch between light and dark mode"></button><button class="square-action fs-toggle" id="toggle-fullscreen" type="button" title="Fullscreen" aria-label="Toggle fullscreen"></button><div class="theme-wrap"><button class="square-action theme-toggle" type="button" title="Themes" aria-label="Change theme" aria-expanded="false">🎨</button><div class="theme-pop hidden"><span class="theme-label">PICK YOUR VIBE</span><div class="theme-swatches"></div></div></div><button class="square-action" id="share-invite" type="button" title="Share invite link" aria-label="Share invite link">↗</button></div>
         </div>
 
         <div class="call-body">
           <main class="stage-area">
             <div class="stage-heading"><div><span class="stage-kicker">THE HANGOUT</span><h2>In good company<span class="heading-period">.</span></h2></div><div class="stage-count"><strong id="participant-count">01</strong><span>/ 05<br />CONNECTED</span></div></div>
             <div class="video-grid" id="video-grid" aria-live="polite"></div>
-            <div class="stage-bottomline"><span><i class="signal-bars"><b></b><b></b><b></b></i> PRIVATE CONNECTION</span><div class="quick-reactions"><span>DROP A REACTION</span><button type="button" data-reaction="🔥" aria-label="Fire">🔥</button><button type="button" data-reaction="💀" aria-label="Dead">💀</button><button type="button" data-reaction="😭" aria-label="Crying laughing">😭</button><button type="button" data-reaction="✨" aria-label="Sparkles">✨</button><button type="button" data-reaction="❤️" aria-label="Heart">❤️</button><button type="button" data-reaction="🎉" aria-label="Hype">🎉</button></div><span>YOUR CAMERA, YOUR CALL.</span></div>
+            <div class="stage-bottomline"><span><i class="signal-bars"><b></b><b></b><b></b></i> PRIVATE CONNECTION</span><div class="quick-reactions"><span>DROP A REACTION</span><button type="button" data-reaction="🔥" aria-label="Fire">🔥</button><button type="button" data-reaction="💀" aria-label="Dead">💀</button><button type="button" data-reaction="😭" aria-label="Crying laughing">😭</button><button type="button" data-reaction="✨" aria-label="Sparkles">✨</button><button type="button" data-reaction="❤️" aria-label="Heart">❤️</button><button type="button" data-reaction="🎉" aria-label="Hype">🎉</button><button type="button" data-reaction="🪩" aria-label="Party mode" title="Party mode for everyone">🪩</button><button type="button" data-reaction="📢" aria-label="Airhorn" title="Airhorn">📢</button></div><span>YOUR CAMERA, YOUR CALL.</span></div>
           </main>
 
           <aside class="side-panel hidden" id="side-panel">
@@ -97,6 +97,7 @@
             <div class="people-view" id="people-view"><div id="participants-list" class="participants-list"></div><div class="panel-note">FIVE SEATS. KEEP IT FRIENDLY.</div></div>
             <div class="chat-view hidden" id="chat-view">
               <div class="chat-messages" id="chat-messages"><div class="chat-empty" id="chat-empty"><span>✳</span><strong>Quiet in here.</strong><p>Start the conversation. Messages disappear when the room closes.</p></div></div>
+              <button class="button chip-button icebreaker-btn" id="icebreaker" type="button">🎲 ICEBREAKER</button>
               <form class="chat-compose" id="chat-form"><input id="chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Say something nice…" aria-label="Chat message" /><button type="submit" aria-label="Send message">↗</button></form>
               <div class="chat-footnote">BE KIND. THIS CHAT IS LIVE ONLY.</div>
             </div>
@@ -132,7 +133,7 @@
         <select class="text-input device-select" id="quality-select"><option value="auto">Auto (best for your room)</option><option value="max">Max — 1080p</option><option value="hd">HD — 720p</option><option value="data">Data saver — 360p</option></select>
         <div class="switch-row"><span>MIRROR MY CAMERA</span><input type="checkbox" id="opt-mirror" checked /></div>
         <div class="switch-row"><span>SOUNDS &amp; HAPTICS</span><input type="checkbox" id="opt-sound" checked /></div>
-        <p class="kbd-hint">SHORTCUTS: M mute · V camera · S share · H hand · C chat · P people · F fullscreen · double-tap a tile to go big</p>
+        <p class="kbd-hint">SHORTCUTS: M mute · V camera · S share · H hand · C chat · P people · G group photo · F fullscreen · ✦ filters · double-tap a tile to go big</p>
         <p class="settings-note">Your browser controls device permissions. Some browsers do not support changing the speaker from a webpage.</p>
         <button class="button button-primary settings-done" id="settings-done" type="button"><span>ALL SET</span><b>✓</b></button>
       </div>
@@ -141,6 +142,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div class="reaction-floats" id="reaction-floats" aria-hidden="true"></div>
     <div id="audio-rack" aria-hidden="true"></div>
-    <script src="/main.js?v=4.0.0" defer></script>
+    <script src="/main.js?v=6.0.0" defer></script>
   </body>
 </html>

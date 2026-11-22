@@ -1,4 +1,4 @@
-# ROOM/05 — Free peer-to-peer video rooms (v4)
+# ROOM/05 — Free peer-to-peer video rooms (v6)
 
 Direct browser-to-browser video, voice, chat and screen sharing (WebRTC).
 No Jitsi, no LiveKit, no API keys, no accounts, no database.
@@ -6,6 +6,15 @@ No Jitsi, no LiveKit, no API keys, no accounts, no database.
 The small Node server only (1) serves the website and (2) passes tiny
 "signaling" messages so browsers can find each other. Audio and video never
 go through the server.
+
+## What's new in v6
+
+- Rock-solid connections: the newcomer always makes the first offer (no more offer collisions), ICE candidates are queued instead of lost, a watchdog auto-repairs stuck links, and your camera/mic state is re-synced. Tiles say "LOADING VIDEO…" until video really arrives, and "CAMERA OFF" only when it truly is off.
+- Camera or mic blocked/in use at join? Tap the button later to connect it, no rejoin needed.
+- Fullscreen button (and F key). Light/dark quick-toggle next to the theme picker.
+- 12 themes including Cyber, Terminal, Vapor, Aurora (animated) and Gameboy.
+- Fun stuff: 🪩 party mode for the whole room, 📢 airhorn, 🎲 icebreaker questions, ✦ video filters (local only), confetti hype, group-photo snap.
+- Phones: full control dock (chat, people, setup) is always reachable.
 
 ## What's new in v4
 

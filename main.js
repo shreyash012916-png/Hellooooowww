@@ -41,17 +41,27 @@
   const prefs = { quality: store.get('quality', 'auto'), mirror: store.get('mirror', '1') === '1', sound: store.get('sound', '1') === '1' };
 
   const THEMES = [
-    ['auto', 'Auto'], ['cream', 'Cream'], ['midnight', 'Midnight'], ['grape', 'Grape'],
-    ['sunset', 'Sunset'], ['bubblegum', 'Bubblegum'], ['matcha', 'Matcha']
+    ['auto', 'Auto'], ['cream', 'Cream'], ['midnight', 'Midnight'], ['cyber', 'Cyber'], ['terminal', 'Terminal'], ['vapor', 'Vapor'],
+    ['aurora', 'Aurora'], ['grape', 'Grape'], ['sunset', 'Sunset'], ['bubblegum', 'Bubblegum'], ['matcha', 'Matcha'], ['gameboy', 'Gameboy']
   ];
-  const THEME_COLORS = { cream: ['#e9e6dc', '#d9ff00'], midnight: ['#0f110e', '#d9ff00'], grape: ['#130e1f', '#c59bff'], sunset: ['#1a0e12', '#ffb347'], bubblegum: ['#ffe0ed', '#ff8bd1'], matcha: ['#dce9d2', '#9dff6a'] };
-  function applyTheme(choice) {
-    let t = choice;
-    if (t === 'auto') t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'midnight' : 'cream';
-    document.documentElement.dataset.theme = t;
+  const THEME_COLORS = { cream: ['#e9e6dc', '#d9ff00'], midnight: ['#0f110e', '#d9ff00'], cyber: ['#07060d', '#ff2bd6'], terminal: ['#020a04', '#39ff6a'], vapor: ['#3b1170', '#ff71ce'], aurora: ['#0a3a3c', '#5cffd2'], grape: ['#130e1f', '#c59bff'], sunset: ['#1a0e12', '#ffb347'], bubblegum: ['#ffe0ed', '#ff8bd1'], matcha: ['#dce9d2', '#9dff6a'], gameboy: ['#c4cfa1', '#8bac0f'] };
+  const DARK_THEMES = new Set(['midnight', 'cyber', 'terminal', 'vapor', 'aurora', 'grape', 'sunset']);
+  function resolveTheme(choice) { return choice === 'auto' ? (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'midnight' : 'cream') : (THEME_COLORS[choice] ? choice : 'cream'); }
+  function applyTheme(choice, animate) {
+    const t = resolveTheme(choice);
+    const root = document.documentElement;
+    if (animate !== false) { root.classList.add('theme-anim'); clearTimeout(applyTheme.tm); applyTheme.tm = setTimeout(() => root.classList.remove('theme-anim'), 600); }
+    root.dataset.theme = t;
+    root.dataset.mode = DARK_THEMES.has(t) ? 'dark' : 'light';
     const meta = $('meta-theme'); if (meta) meta.content = THEME_COLORS[t][0];
     store.set('theme', choice);
+    if (choice !== 'auto') store.set(DARK_THEMES.has(t) ? 'last-dark' : 'last-light', choice);
     document.querySelectorAll('.theme-chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.theme === choice)));
+  }
+  function toggleMode() {
+    const t = resolveTheme(store.get('theme', 'auto'));
+    applyTheme(DARK_THEMES.has(t) ? store.get('last-light', 'cream') : store.get('last-dark', 'midnight'));
+    buzz();
   }
   function buildThemePickers() {
     document.querySelectorAll('.theme-swatches').forEach((box) => {
@@ -65,7 +75,8 @@
         box.appendChild(b);
       });
     });
-    applyTheme(store.get('theme', 'auto'));
+    applyTheme(store.get('theme', 'auto'), false);
+    document.querySelectorAll('.mode-toggle').forEach((b) => b.addEventListener('click', toggleMode));
     document.querySelectorAll('.theme-wrap').forEach((wrap) => {
       const btn = wrap.querySelector('.theme-toggle'); const pop = wrap.querySelector('.theme-pop');
       btn.addEventListener('click', (e) => { e.stopPropagation(); const open = pop.classList.toggle('hidden') === false; btn.setAttribute('aria-expanded', String(open)); });
@@ -157,21 +168,42 @@
   }
 
   // ---------- local media ----------
+  const gUM = (c) => navigator.mediaDevices.getUserMedia(c);
   async function getLocalMedia() {
-    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 48000 };
-    const qq = qualityFor(1);
-    const video = { width: { ideal: qq.w }, height: { ideal: qq.h }, frameRate: { ideal: qq.fps, max: qq.fps }, facingMode: 'user' };
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('Camera and microphone need HTTPS and an up-to-date browser.');
     }
-    try { return await navigator.mediaDevices.getUserMedia({ audio, video }); } catch (e1) {
-      try { toast('Camera unavailable — joining with microphone only.'); return await navigator.mediaDevices.getUserMedia({ audio }); } catch (e2) {
-        try { toast('Microphone unavailable — joining with camera only.'); return await navigator.mediaDevices.getUserMedia({ video }); } catch (e3) {
-          toast('No camera or microphone access — joining as a viewer.');
-          return new MediaStream();
-        }
-      }
+    const qq = qualityFor(1);
+    const audioHi = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    const videoHi = { width: { ideal: qq.w }, height: { ideal: qq.h }, frameRate: { ideal: qq.fps }, facingMode: 'user' };
+    // 1) both at once (best), 2) both with plain constraints
+    for (const c of [{ audio: audioHi, video: videoHi }, { audio: true, video: true }]) {
+      try { return await gUM(c); } catch (_) { /* try next */ }
     }
+    // 3) get each device on its own so one failing never costs us the other
+    const stream = new MediaStream();
+    let gotV = false, gotA = false;
+    for (const c of [{ video: videoHi }, { video: true }]) { if (gotV) break; try { (await gUM(c)).getTracks().forEach((t) => { stream.addTrack(t); gotV = true; }); } catch (_) {} }
+    for (const c of [{ audio: audioHi }, { audio: true }]) { if (gotA) break; try { (await gUM(c)).getTracks().forEach((t) => { stream.addTrack(t); gotA = true; }); } catch (_) {} }
+    if (!gotV && !gotA) toast('No camera or microphone access — joining as a viewer. Tap the camera button to try again.');
+    else if (!gotV) toast('Camera unavailable (blocked or in use) — tap the camera button to retry.');
+    else if (!gotA) toast('Microphone unavailable — tap the mic button to retry.');
+    return stream;
+  }
+
+  // Try to get a missing camera/mic later (permission granted, other app released it, ...)
+  async function acquireTrack(kind) {
+    try {
+      const q = qualityFor(peers.size || 1);
+      const s2 = await gUM(kind === 'video'
+        ? { video: { width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps }, facingMode: 'user' } }
+        : { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const t = s2.getTracks()[0];
+      if (!t) return null;
+      if (kind === 'video') { try { t.contentHint = 'motion'; } catch (_) {} }
+      localStream.addTrack(t);
+      return t;
+    } catch (_) { return null; }
   }
 
   const audioTrack = () => (localStream && localStream.getAudioTracks()[0]) || null;
@@ -266,7 +298,9 @@
     pin.addEventListener('click', (e) => { e.stopPropagation(); togglePin(id); });
     const fs = document.createElement('button'); fs.type = 'button'; fs.textContent = '⛶'; fs.title = 'Fullscreen'; fs.setAttribute('aria-label', 'Fullscreen tile');
     fs.addEventListener('click', (e) => { e.stopPropagation(); tileFullscreen(tile); });
-    actions.append(pin, fs);
+    const fl = document.createElement('button'); fl.type = 'button'; fl.textContent = '✦'; fl.title = 'Filter (only you see it)'; fl.setAttribute('aria-label', 'Cycle video filter');
+    fl.addEventListener('click', (e) => { e.stopPropagation(); window.__room05Filter(tile); });
+    actions.append(pin, fl, fs);
     stage.append(ph, layer, ring, flags, actions);
     tile.addEventListener('dblclick', () => tileFullscreen(tile));
     const footer = document.createElement('div');
@@ -286,8 +320,11 @@
   }
 
   function paintTile(tile, st, stream, extra) {
-    const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live') && (st.cam || st.screen);
+    const hasTrack = !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live');
+    const hasVideo = hasTrack && (st.cam || st.screen);
     tile.classList.toggle('no-video', !hasVideo);
+    const cap = tile.querySelector('.placeholder-caption');
+    if (cap) cap.textContent = hasTrack || st.cam === false ? 'CAMERA OFF' : (extra === 'CONNECTED' || !extra ? 'LOADING VIDEO…' : 'CONNECTING…');
     tile.querySelector('.hand-flag').classList.toggle('hidden', !st.hand);
     const v = tile.querySelector('video');
     v.classList.toggle('screen-track', !!st.screen);
@@ -374,20 +411,61 @@
   }
 
   // ---------- peer connections (perfect negotiation) ----------
-  function createPeer(id, name) {
+  // Attach our camera/mic to a peer's audio+video transceivers (never needs renegotiation later: we just swap tracks).
+  async function attachSenders(p, at, vt) {
+    p.asender = at ? at.sender : null;
+    p.vsender = vt ? vt.sender : null;
+    p.attached = true;
+    const jobs = [];
+    if (p.asender && audioTrack() && p.asender.track !== audioTrack()) jobs.push(p.asender.replaceTrack(audioTrack()));
+    if (p.vsender && outgoingVideoTrack() && p.vsender.track !== outgoingVideoTrack()) jobs.push(p.vsender.replaceTrack(outgoingVideoTrack()));
+    try { await Promise.all(jobs); } catch (e) { console.warn('attach failed', e); }
+    if (p.asender) tuneAudioSender(p.asender);
+    if (p.vsender) tuneVideoSender(p.vsender);
+  }
+
+  // The newcomer always makes the first offer; the people already in the room just answer. No collisions, no lost media.
+  async function attachFromOffer(p) {
+    const ts = p.pc.getTransceivers();
+    const find = (kind) => ts.find((t) => t.receiver && t.receiver.track && t.receiver.track.kind === kind && !t.stopped);
+    const at = find('audio'), vt = find('video');
+    [at, vt].forEach((t) => { if (t) { try { t.direction = 'sendrecv'; } catch (_) {} } });
+    await attachSenders(p, at, vt);
+  }
+
+  function watchPeer(p, attempt) {
+    clearTimeout(p.watchdog);
+    p.watchdog = setTimeout(() => {
+      if (peers.get(p.id) !== p || !inRoom) return;
+      const pc = p.pc;
+      const hasTrack = p.stream.getVideoTracks().some((t) => t.readyState === 'live');
+      const healthy = pc.connectionState === 'connected' && (hasTrack || p.state.cam === false);
+      if (healthy) { renderPeerTile(p); return; }
+      if (attempt >= 4) { toast(p.name + ': still linking — a strict network may need a TURN relay.'); return; }
+      try { pc.restartIce(); } catch (_) {}
+      sendMyStateTo();
+      watchPeer(p, attempt + 1);
+    }, attempt === 0 ? 7000 : 9000);
+  }
+
+  function createPeer(id, name, initiator) {
     if (peers.has(id)) return peers.get(id);
-    const pc = new RTCPeerConnection({ iceServers: config.iceServers, bundlePolicy: 'max-bundle' });
-    const p = { id, name, pc, polite: myId > id, makingOffer: false, ignoreOffer: false, stream: new MediaStream(), state: { mic: true, cam: true, screen: false, hand: false }, vsender: null, asender: null, tile: null, connState: 'connecting', pending: [] };
+    const pc = new RTCPeerConnection({ iceServers: config.iceServers, bundlePolicy: 'max-bundle', iceCandidatePoolSize: 4 });
+    const p = { id, name, pc, polite: myId > id, initiator: !!initiator, makingOffer: false, ignoreOffer: false, stream: new MediaStream(), state: { mic: true, cam: true, screen: false, hand: false }, vsender: null, asender: null, tile: null, connState: 'connecting', queue: Promise.resolve(), pendingCandidates: [], attached: false, watchdog: null };
     peers.set(id, p);
 
-    const at = audioTrack();
-    if (at) { p.asender = pc.addTrack(at, localStream); tuneAudioSender(p.asender); }
-    const vt = outgoingVideoTrack();
-    if (vt) { p.vsender = pc.addTrack(vt, localStream); tuneVideoSender(p.vsender); }
+    if (initiator) {
+      const at = audioTrack(), vt = outgoingVideoTrack();
+      const ta = at ? pc.addTransceiver(at, { direction: 'sendrecv', streams: [localStream] }) : pc.addTransceiver('audio', { direction: 'sendrecv' });
+      const tv = vt ? pc.addTransceiver(vt, { direction: 'sendrecv', streams: [localStream] }) : pc.addTransceiver('video', { direction: 'sendrecv' });
+      p.asender = ta.sender; p.vsender = tv.sender; p.attached = true;
+    }
 
     pc.ontrack = ({ track }) => {
       p.stream.addTrack(track);
       track.onended = () => { try { p.stream.removeTrack(track); } catch (_) {} renderPeerTile(p); };
+      track.onmute = () => renderPeerTile(p);
+      track.onunmute = () => renderPeerTile(p);
       if (!p.tile) {
         p.tile = buildTile(id, p.name, false);
         videoGrid.appendChild(p.tile);
@@ -395,9 +473,11 @@
         layoutGrid();
         renderPeople();
       }
+      const v = p.tile.querySelector('video');
+      v.onloadedmetadata = v.onresize = v.onplaying = () => renderPeerTile(p);
+      v.srcObject = p.stream; // re-attach so every browser (Safari included) picks up late tracks
       renderPeerTile(p);
       const sink = $('audio-output-select').value;
-      const v = p.tile.querySelector('video');
       if (sink && v.setSinkId) v.setSinkId(sink).catch(() => {});
       const playing = v.play(); if (playing && playing.catch) playing.catch(() => {});
     };
@@ -415,22 +495,26 @@
     pc.onconnectionstatechange = () => {
       p.connState = pc.connectionState;
       renderPeerTile(p);
-      if (pc.connectionState === 'disconnected') { setTimeout(() => { if (peers.get(id) === p && pc.connectionState === 'disconnected') { try { pc.restartIce(); } catch (_) {} } }, 4000); }
+      if (pc.connectionState === 'connected') {
+        if (p.vsender) tuneVideoSender(p.vsender);
+        if (p.asender) tuneAudioSender(p.asender);
+        sendMyStateTo(); // make sure they know our camera/mic state the moment media can flow
+      }
+      if (pc.connectionState === 'disconnected') { setTimeout(() => { if (peers.get(id) === p && pc.connectionState === 'disconnected') { try { pc.restartIce(); } catch (_) {} } }, 3000); }
       if (pc.connectionState === 'failed') {
         try { pc.restartIce(); } catch (_) {}
         toast(p.name + ': connection is struggling — retrying. Strict networks may need a TURN relay.');
       }
     };
 
-    // Make sure a tile exists even before media arrives (e.g. viewer with no tracks)
-    if (!p.tile) {
-      p.tile = buildTile(id, name, false);
-      videoGrid.appendChild(p.tile);
-      renderPeerTile(p);
-      layoutGrid();
-    }
+    // Show a tile right away, even before media arrives
+    p.tile = buildTile(id, name, false);
+    videoGrid.appendChild(p.tile);
+    renderPeerTile(p);
+    layoutGrid();
     renderPeople();
     retuneAll();
+    watchPeer(p, 0);
     return p;
   }
 
@@ -460,9 +544,13 @@
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'signal', to, data }));
   }
 
-  async function handleSignal(from, data) {
+  function handleSignal(from, data) {
     const p = peers.get(from);
     if (!p || !data) return;
+    p.queue = p.queue.then(() => processSignal(p, data)).catch(() => {});
+  }
+
+  async function processSignal(p, data) {
     const pc = p.pc;
     try {
       if (data.description) {
@@ -471,11 +559,14 @@
         p.ignoreOffer = !p.polite && collision;
         if (p.ignoreOffer) return;
         await pc.setRemoteDescription(d);
+        for (const c of p.pendingCandidates.splice(0)) { try { await pc.addIceCandidate(c); } catch (_) {} }
         if (d.type === 'offer') {
+          if (!p.attached) await attachFromOffer(p);
           await pc.setLocalDescription();
-          sendSignal(from, { description: pc.localDescription });
+          sendSignal(p.id, { description: pc.localDescription });
         }
       } else if (data.candidate) {
+        if (!pc.remoteDescription) { p.pendingCandidates.push(data.candidate); return; }
         try { await pc.addIceCandidate(data.candidate); } catch (e) { if (!p.ignoreOffer) console.warn('ICE candidate error', e); }
       }
     } catch (e) { console.warn('signal handling failed', e); }
@@ -484,6 +575,7 @@
   function removePeer(id) {
     const p = peers.get(id);
     if (!p) return;
+    clearTimeout(p.watchdog);
     try { p.pc.close(); } catch (_) {}
     if (p.tile) p.tile.remove();
     peers.delete(id);
@@ -496,7 +588,7 @@
   }
 
   function closeAllPeers() {
-    peers.forEach((p) => { try { p.pc.close(); } catch (_) {} if (p.tile) p.tile.remove(); });
+    peers.forEach((p) => { clearTimeout(p.watchdog); try { p.pc.close(); } catch (_) {} if (p.tile) p.tile.remove(); });
     peers.clear();
   }
 
@@ -523,7 +615,7 @@
   function onServerMessage(m) {
     switch (m.type) {
       case 'peer-joined': {
-        const p = createPeer(m.id, m.name);
+        const p = createPeer(m.id, m.name, false);
         p.state = { mic: true, cam: true, screen: false, hand: false };
         blip('join');
         toast(m.name + ' joined.');
@@ -564,7 +656,7 @@
       const { sock, joined } = await openSocket();
       ws = sock; myId = joined.id; retryCount = 0;
       setStatus('CONNECTED', 'ok');
-      joined.peers.forEach((pr) => { createPeer(pr.id, pr.name).state = pr.state && Object.keys(pr.state).length ? pr.state : { mic: true, cam: true, screen: false, hand: false }; });
+      joined.peers.forEach((pr) => { createPeer(pr.id, pr.name, true).state = pr.state && Object.keys(pr.state).length ? pr.state : { mic: true, cam: true, screen: false, hand: false }; });
       sendMyStateTo();
       toast('Reconnected.');
     } catch (_) { attemptReconnect(); }
@@ -577,6 +669,7 @@
       if (!ws || ws.readyState !== 1) return;
       if (Date.now() - lastPong > 50000) { try { ws.close(); } catch (_) {} return; }
       ws.send(JSON.stringify({ type: 'ping' }));
+      sendMyStateTo();
     }, 15000);
   }
   function stopHeartbeat() { clearInterval(hbTimer); hbTimer = null; }
@@ -650,7 +743,7 @@
       setStatus('CONNECTED', 'ok');
       startHeartbeat(); startStats(); acquireWakeLock(); document.body.classList.add('in-call');
       joined.peers.forEach((pr) => {
-        const p = createPeer(pr.id, pr.name);
+        const p = createPeer(pr.id, pr.name, true);
         if (pr.state && Object.keys(pr.state).length) p.state = pr.state;
       });
       sendMyStateTo();
@@ -683,6 +776,7 @@
 
   function leaveRoom() {
     leaving = true; inRoom = false;
+    document.body.classList.remove('party');
     stopHeartbeat(); stopStats(); releaseWakeLock(); document.body.classList.remove('in-call'); pinnedId = null;
     if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (_) {} }
     if (ws) { const s = ws; ws = null; try { s.close(); } catch (_) {} }
@@ -701,14 +795,26 @@
   }
 
   // ---------- controls ----------
-  $('toggle-mic').addEventListener('click', () => {
-    const t = audioTrack();
-    if (!t) { toast('No microphone available.'); return; }
+  $('toggle-mic').addEventListener('click', async () => {
+    let t = audioTrack();
+    if (!t) {
+      t = await acquireTrack('audio');
+      if (!t) { toast('Microphone is blocked or in use. Allow it in your browser, then tap again.'); return; }
+      state.mic = true;
+      for (const p of peers.values()) { if (p.asender) { try { await p.asender.replaceTrack(t); } catch (_) {} } }
+      syncButtons(); broadcastState(); toast('Microphone connected.'); return;
+    }
     state.mic = !state.mic; t.enabled = state.mic; syncButtons(); broadcastState();
   });
-  $('toggle-camera').addEventListener('click', () => {
-    const t = cameraTrack();
-    if (!t) { toast('No camera available.'); return; }
+  $('toggle-camera').addEventListener('click', async () => {
+    let t = cameraTrack();
+    if (!t) {
+      t = await acquireTrack('video');
+      if (!t) { toast('Camera is blocked or in use by another app. Allow it, then tap again.'); return; }
+      state.cam = true;
+      if (!state.screen) await setOutgoingVideo(t);
+      syncButtons(); broadcastState(); toast('Camera connected.'); return;
+    }
     state.cam = !state.cam; t.enabled = state.cam; syncButtons(); broadcastState();
   });
   $('toggle-hand').addEventListener('click', () => { state.hand = !state.hand; syncButtons(); broadcastState(); });
@@ -717,7 +823,6 @@
     for (const p of peers.values()) {
       try {
         if (p.vsender) { await p.vsender.replaceTrack(track); }
-        else if (track) { p.vsender = p.pc.addTrack(track, localStream); tuneVideoSender(p.vsender); }
       } catch (e) { console.warn('replaceTrack failed', e); }
     }
   }
@@ -792,6 +897,8 @@
     box.appendChild(el);
     setTimeout(() => el.remove(), 2700);
     if (emoji === '🎉') confetti();
+    else if (emoji === '🪩') party();
+    else if (emoji === '📢') airhorn();
     else if (box.children.length > 12) box.firstChild.remove();
   }
   function confetti() {
@@ -855,7 +962,7 @@
     try {
       const constraints = kind === 'audio'
         ? { audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
-        : { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: qualityFor(peers.size).w }, height: { ideal: qualityFor(peers.size).h }, frameRate: { ideal: 30, max: 30 } } };
+        : { video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: qualityFor(peers.size).w }, height: { ideal: qualityFor(peers.size).h }, frameRate: { ideal: 30 } } };
       const fresh = await navigator.mediaDevices.getUserMedia(constraints);
       const track = fresh.getTracks()[0];
       const old = kind === 'audio' ? audioTrack() : cameraTrack();
@@ -863,8 +970,8 @@
       track.enabled = kind === 'audio' ? state.mic : state.cam;
       localStream.addTrack(track);
       for (const p of peers.values()) {
-        if (kind === 'audio') { if (p.asender) await p.asender.replaceTrack(track); else p.asender = p.pc.addTrack(track, localStream); }
-        else if (!state.screen) { if (p.vsender) await p.vsender.replaceTrack(track); else { p.vsender = p.pc.addTrack(track, localStream); tuneVideoSender(p.vsender); } }
+        if (kind === 'audio') { if (p.asender) await p.asender.replaceTrack(track); }
+        else if (!state.screen) { if (p.vsender) await p.vsender.replaceTrack(track); }
       }
       renderLocalTile();
       refreshDevices();
@@ -930,9 +1037,72 @@
     const k = e.key.toLowerCase();
     const map = { m: 'toggle-mic', v: 'toggle-camera', s: 'toggle-screen', h: 'toggle-hand', c: 'open-chat', p: 'open-people' };
     if (map[k]) { e.preventDefault(); $(map[k]).click(); }
-    else if (k === 'f') { e.preventDefault(); tileFullscreen(videoGrid.querySelector('.video-tile.pinned') || localTile); }
+    else if (k === 'f') { e.preventDefault(); if (fsBtn && fsSupported) toggleFullscreen(); else tileFullscreen(videoGrid.querySelector('.video-tile.pinned') || localTile); }
+    else if (k === 'g') { e.preventDefault(); $('snap-photo').click(); }
     else if (k === 'escape') { $('settings-overlay').classList.add('hidden'); }
   });
+
+  // ---------- fullscreen (whole app) ----------
+  const fsRoot = document.documentElement;
+  const fsSupported = !!(fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen);
+  function isFs() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  async function toggleFullscreen() {
+    try {
+      if (isFs()) { if (document.exitFullscreen) await document.exitFullscreen(); else document.webkitExitFullscreen(); }
+      else { if (fsRoot.requestFullscreen) await fsRoot.requestFullscreen({ navigationUI: 'hide' }); else fsRoot.webkitRequestFullscreen(); }
+    } catch (_) { toast('Fullscreen is not available here.'); }
+  }
+  const fsBtn = $('toggle-fullscreen');
+  if (fsBtn) {
+    if (!fsSupported) fsBtn.style.display = 'none'; else fsBtn.addEventListener('click', toggleFullscreen);
+    const sync = () => fsRoot.classList.toggle('is-fullscreen', isFs());
+    document.addEventListener('fullscreenchange', sync); document.addEventListener('webkitfullscreenchange', sync);
+  }
+
+  // ---------- party mode, airhorn, icebreakers, tile filters ----------
+  let partyTimer = null;
+  function party() {
+    document.body.classList.add('party');
+    document.querySelectorAll('.party-banner').forEach((n) => n.remove());
+    const b = document.createElement('div'); b.className = 'party-banner'; b.textContent = '🪩 PARTY MODE'; document.body.appendChild(b);
+    confetti(); setTimeout(confetti, 700); setTimeout(confetti, 1500);
+    buzz([30, 40, 30, 40, 60]); blip('join');
+    clearTimeout(partyTimer);
+    partyTimer = setTimeout(() => { document.body.classList.remove('party'); b.remove(); }, 9000);
+  }
+  function airhorn() {
+    if (!prefs.sound) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const t0 = audioCtx.currentTime;
+      [0, 0.28, 0.56].forEach((d, i) => {
+        [440, 554, 659].forEach((f) => {
+          const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+          o.type = 'sawtooth'; o.frequency.setValueAtTime(f * 0.97, t0 + d); o.frequency.linearRampToValueAtTime(f * (i === 2 ? 1.1 : 1), t0 + d + 0.05);
+          g.gain.setValueAtTime(0.0001, t0 + d); g.gain.exponentialRampToValueAtTime(0.07, t0 + d + 0.02); g.gain.setValueAtTime(0.07, t0 + d + (i === 2 ? 0.5 : 0.18)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + (i === 2 ? 0.7 : 0.24));
+          o.connect(g); g.connect(audioCtx.destination); o.start(t0 + d); o.stop(t0 + d + 0.75);
+        });
+      });
+      buzz([60, 40, 60]);
+    } catch (_) {}
+  }
+  const ICEBREAKERS = ['Hot take: pineapple on pizza — yes or no?', 'What song is stuck in your head right now?', 'Worst haircut you ever had. Go.', 'Which app do you open first every morning?', 'What is the most useless skill you have?', 'Superpower you would pick but only for 5 minutes?', 'Last thing you watched that you could not stop talking about?', 'Describe your week as a movie title.', 'Cereal: milk first or cereal first?', 'What would your walk-up song be?', 'Unpopular opinion you will defend forever?', 'What emoji is your whole personality?', 'Dream trip if money did not matter?', 'Most random thing in your camera roll right now?', 'If we all started a band, what instrument are you?', 'What is your comfort show?', 'Rate your Wi-Fi from 1 to 10. Be honest.', 'What is a tiny thing that made you happy today?', 'Pick one: only text or only calls forever?', 'What is the weirdest food combo you secretly love?'];
+  const icebreakerBtn = $('icebreaker');
+  if (icebreakerBtn) icebreakerBtn.addEventListener('click', () => {
+    if (!ws || ws.readyState !== 1) return;
+    const text = '🎲 ' + ICEBREAKERS[(Math.random() * ICEBREAKERS.length) | 0];
+    ws.send(JSON.stringify({ type: 'chat', text })); appendChat(localName + ' (YOU)', text);
+  });
+  const FILTERS = [['none', 'Normal'], ['grayscale(1) contrast(1.1)', 'Noir'], ['sepia(.9) contrast(1.05)', 'Old film'], ['hue-rotate(90deg) saturate(1.6)', 'Alien'], ['saturate(2.2) contrast(1.15)', 'Pop'], ['invert(1) hue-rotate(180deg)', 'Negative'], ['contrast(1.4) saturate(1.8) hue-rotate(-30deg)', 'Neon']];
+  function cycleFilter(tile) {
+    const v = tile.querySelector('video'); if (!v) return;
+    const i = ((Number(tile.dataset.filter || 0)) + 1) % FILTERS.length;
+    tile.dataset.filter = String(i);
+    v.style.filter = FILTERS[i][0] === 'none' ? '' : FILTERS[i][0];
+    toast('Filter: ' + FILTERS[i][1] + ' (only you see this)');
+  }
+  window.__room05Filter = cycleFilter;
 
   buildThemePickers();
 
