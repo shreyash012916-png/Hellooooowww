@@ -6,6 +6,93 @@
   const $ = (id) => document.getElementById(id);
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
+  // A page-local owner token prevents the same browser profile from joining
+  // the same room in two tabs (the second tab would otherwise appear as a
+  // duplicate attendee and may have no camera because the first tab owns it).
+  const TAB_OWNER = (() => {
+    try { const bytes = new Uint8Array(16); crypto.getRandomValues(bytes); return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(''); }
+    catch (_) { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); }
+  })();
+  let activeRoomLockKey = '';
+  let activeRoomLockTimer = null;
+  let activeRoomLockRelease = null;
+
+  function claimRoomTabWithStorage(code) {
+    const key = 'room05-active-room-' + code;
+    const now = Date.now();
+    try {
+      const existing = JSON.parse(localStorage.getItem(key) || 'null');
+      if (existing && existing.owner !== TAB_OWNER && Number(existing.expires) > now) return false;
+      localStorage.setItem(key, JSON.stringify({ owner: TAB_OWNER, expires: now + 90000 }));
+      const verified = JSON.parse(localStorage.getItem(key) || 'null');
+      if (!verified || verified.owner !== TAB_OWNER) return false;
+      activeRoomLockKey = key;
+      clearInterval(activeRoomLockTimer);
+      activeRoomLockTimer = setInterval(() => {
+        try {
+          const current = JSON.parse(localStorage.getItem(key) || 'null');
+          if (!current || current.owner !== TAB_OWNER) {
+            clearInterval(activeRoomLockTimer); activeRoomLockTimer = null; activeRoomLockKey = '';
+            if (inRoom && !leaving) { toast('This room is active in another tab.'); leaveRoom(); }
+            return;
+          }
+          localStorage.setItem(key, JSON.stringify({ owner: TAB_OWNER, expires: Date.now() + 90000 }));
+        } catch (_) {}
+      }, 25000);
+      return true;
+    } catch (_) {
+      // Continue normally when browser storage is disabled or unavailable.
+      return true;
+    }
+  }
+
+  async function claimRoomTab(code) {
+    const key = 'room05-active-room-' + code;
+    // Web Locks are atomic across tabs and remain held even when a mobile
+    // browser throttles background-tab timers.
+    if (navigator.locks && typeof navigator.locks.request === 'function') {
+      let outcome = 'pending';
+      let resolveAcquired;
+      let releaseHold = null;
+      const acquired = new Promise((resolve) => { resolveAcquired = resolve; });
+      const lockTask = navigator.locks.request(key, { mode: 'exclusive', ifAvailable: true }, async (lock) => {
+        if (!lock) { outcome = 'busy'; resolveAcquired(false); return; }
+        outcome = 'held';
+        resolveAcquired(true);
+        await new Promise((resolve) => { releaseHold = resolve; });
+      });
+      lockTask.catch(() => {
+        if (outcome === 'pending') { outcome = 'failed'; resolveAcquired(false); }
+      });
+      const acquiredLock = await acquired;
+      if (acquiredLock) {
+        activeRoomLockKey = key;
+        activeRoomLockRelease = () => {
+          if (releaseHold) { const release = releaseHold; releaseHold = null; release(); }
+        };
+        return true;
+      }
+      if (outcome === 'busy') return false;
+    }
+    return claimRoomTabWithStorage(code);
+  }
+
+  function releaseRoomTab() {
+    clearInterval(activeRoomLockTimer); activeRoomLockTimer = null;
+    if (activeRoomLockRelease) {
+      const release = activeRoomLockRelease;
+      activeRoomLockRelease = null;
+      activeRoomLockKey = '';
+      release();
+      return;
+    }
+    if (!activeRoomLockKey) return;
+    try {
+      const current = JSON.parse(localStorage.getItem(activeRoomLockKey) || 'null');
+      if (current && current.owner === TAB_OWNER) localStorage.removeItem(activeRoomLockKey);
+    } catch (_) {}
+    activeRoomLockKey = '';
+  }
 
   const landing = $('landing-screen');
   const callScreen = $('call-screen');
@@ -720,6 +807,11 @@
     code = String(code || '').toUpperCase();
     if (!CODE_RE.test(code)) { setError('Enter a valid 8-character room code (no I, O, 0 or 1).'); $('room-code').focus(); return; }
 
+    if (!(await claimRoomTab(code))) {
+      setError('This room is already open in another tab of this browser. Use the existing tab, or leave that room first.');
+      return;
+    }
+
     localName = name; currentCode = code; leaving = false; retryCount = 0;
     setBusy(true);
     try {
@@ -760,6 +852,7 @@
     } catch (error) {
       console.error('ROOM/05 startup:', error);
       cleanupMedia();
+      releaseRoomTab();
       callScreen.classList.add('hidden');
       landing.classList.remove('hidden');
       videoGrid.innerHTML = '';
@@ -776,6 +869,7 @@
 
   function leaveRoom() {
     leaving = true; inRoom = false;
+    releaseRoomTab();
     document.body.classList.remove('party');
     stopHeartbeat(); stopStats(); releaseWakeLock(); document.body.classList.remove('in-call'); pinnedId = null;
     if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (_) {} }
@@ -828,26 +922,54 @@
   }
 
   async function stopScreenShare() {
-    if (screenStream) { screenStream.getTracks().forEach((t) => t.stop()); screenStream = null; }
+    const previousStream = screenStream;
+    // Switch back first so a browser-generated track-ended event cannot race
+    // with the toolbar stop action.
+    screenStream = null;
     state.screen = false;
+    if (previousStream) {
+      previousStream.getTracks().forEach((t) => {
+        t.onended = null;
+        if (t.readyState !== 'ended') { try { t.stop(); } catch (_) {} }
+      });
+    }
     await setOutgoingVideo(cameraTrack());
     peers.forEach((p) => { if (p.vsender) tuneVideoSender(p.vsender); });
     syncButtons(); broadcastState();
   }
 
   $('toggle-screen').addEventListener('click', async () => {
-    if (state.screen) { await stopScreenShare(); return; }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { toast('Screen sharing is not supported on this browser/device.'); return; }
+    if (state.screen) { await stopScreenShare(); toast('Screen sharing stopped.'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      toast('Screen sharing is not supported on this browser/device. Try a desktop browser.');
+      return;
+    }
+    let captured = null;
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 } }, audio: false });
-      const track = screenStream.getVideoTracks()[0];
+      // getDisplayMedia must be called directly from this button gesture.
+      captured = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 30 } },
+        audio: false
+      });
+      const track = captured.getVideoTracks()[0];
+      if (!track) throw new Error('No screen video track was provided.');
+      screenStream = captured;
       try { track.contentHint = 'detail'; } catch (_) {}
-      track.onended = () => { if (state.screen) stopScreenShare(); };
+      track.onended = () => {
+        if (state.screen && screenStream === captured) stopScreenShare();
+      };
       state.screen = true;
       await setOutgoingVideo(track);
       peers.forEach((p) => { if (p.vsender) tuneVideoSender(p.vsender); });
       syncButtons(); broadcastState();
-    } catch (e) { screenStream = null; if (e && e.name !== 'NotAllowedError') toast('Could not start screen sharing.'); }
+      toast('Screen sharing started.');
+    } catch (e) {
+      if (captured) captured.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+      if (screenStream === captured) screenStream = null;
+      state.screen = false;
+      syncButtons(); renderLocalTile();
+      if (e && e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast('Could not start screen sharing. Check browser permissions and try again.');
+    }
   });
 
   $('leave-room').addEventListener('click', leaveRoom);
@@ -1118,7 +1240,10 @@
   const initial = new URLSearchParams(location.search).get('room');
   if (initial && CODE_RE.test(initial.toUpperCase())) $('room-code').value = initial.toUpperCase();
 
-  window.addEventListener('beforeunload', () => { if (ws) { try { ws.close(); } catch (_) {} } });
+  window.addEventListener('beforeunload', () => {
+    releaseRoomTab();
+    if (ws) { try { ws.close(); } catch (_) {} }
+  });
 
   // Wake a sleeping free Render instance as soon as the page opens.
   fetch('/health', { cache: 'no-store' }).catch(() => {});
